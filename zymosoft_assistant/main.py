@@ -124,6 +124,7 @@ def main():
 
         # Afficher le dialogue de sélection du mode
         mode_dialog = ModeSelectionDialog()
+        mode_dialog.showMaximized()
         if mode_dialog.exec_() != ModeSelectionDialog.Accepted:
             logger.info("L'utilisateur a fermé le dialogue de sélection du mode")
             return 0

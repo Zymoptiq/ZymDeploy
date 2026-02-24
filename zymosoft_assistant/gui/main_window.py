@@ -142,8 +142,8 @@ class MainWindow(QMainWindow):
 
             /* Menu bar - bordure bas et fond uniforme */
             QMenuBar {{
-background-color: #f5f6fa;                
-border: none;
+                background-color: #f5f6fa;                
+                border: none;
                 color: {COLOR_SCHEME['text']};
                 padding: 0px;
                 margin: 0px;
@@ -154,11 +154,45 @@ border: none;
             QMenuBar::item {{
                 background-color: transparent;
                 padding: 5px 10px;
+                color: {COLOR_SCHEME['text']};
             }}
 
             QMenuBar::item:selected {{
                 background-color: {COLOR_SCHEME['primary']};
                 color: white;
+            }}
+
+            QMenuBar::item:pressed {{
+                background-color: {COLOR_SCHEME['primary_pressed']};
+            }}
+
+            /* Menu déroulant */
+            QMenu {{
+                background-color: white;
+                border: 1px solid {COLOR_SCHEME['border']};
+                padding: 5px 0px;
+            }}
+
+            QMenu::item {{
+                padding: 8px 25px 8px 20px;
+                color: {COLOR_SCHEME['text']};
+                background-color: transparent;
+            }}
+
+            QMenu::item:selected {{
+                background-color: {COLOR_SCHEME['primary']};
+                color: white;
+            }}
+
+            QMenu::item:disabled {{
+                color: {COLOR_SCHEME['text_secondary']};
+                background-color: #f5f5f5;
+            }}
+
+            QMenu::separator {{
+                height: 1px;
+                background-color: {COLOR_SCHEME['border']};
+                margin: 5px 0px;
             }}
 
             /* Sidebar (colonne de gauche) */
@@ -422,17 +456,17 @@ border: none;
         # Menu Fichier
         file_menu = menubar.addMenu("Fichier")
 
-        new_session_action = QAction("Nouvelle session", self)
-        new_session_action.triggered.connect(self.new_session)
-        file_menu.addAction(new_session_action)
+        self.new_session_action = QAction("Nouvelle session", self)
+        self.new_session_action.triggered.connect(self.new_session)
+        file_menu.addAction(self.new_session_action)
 
-        load_session_action = QAction("Charger session", self)
-        load_session_action.triggered.connect(self.load_session)
-        file_menu.addAction(load_session_action)
+        self.load_session_action = QAction("Charger session", self)
+        self.load_session_action.triggered.connect(self.load_session)
+        file_menu.addAction(self.load_session_action)
 
-        save_session_action = QAction("Sauvegarder session", self)
-        save_session_action.triggered.connect(self.save_session)
-        file_menu.addAction(save_session_action)
+        self.save_session_action = QAction("Sauvegarder session", self)
+        self.save_session_action.triggered.connect(self.save_session)
+        file_menu.addAction(self.save_session_action)
 
         file_menu.addSeparator()
 
@@ -464,6 +498,12 @@ border: none;
         if self.mode == MODE_FULL:
             self.full_mode_action.setEnabled(False)
         actions_menu.addAction(self.full_mode_action)
+
+        # Désactiver les actions de session en mode validation only
+        if self.mode == MODE_VALIDATION_ONLY:
+            self.new_session_action.setEnabled(False)
+            self.load_session_action.setEnabled(False)
+            self.save_session_action.setEnabled(False)
 
         # Menu Aide
         help_menu = menubar.addMenu("Aide")
@@ -760,6 +800,12 @@ border: none;
         """
         Crée une nouvelle session
         """
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.information(self, "Fonctionnalité non disponible",
+                                   "La gestion de session n'est pas disponible en mode validation de plaque.\n\n"
+                                   "Cette fonctionnalité est réservée au mode installation complète.")
+            return
+
         reply = QMessageBox.question(self, "Nouvelle session",
                                      "Êtes-vous sûr de vouloir créer une nouvelle session ? "
                                      "Toutes les données non sauvegardées seront perdues.",
@@ -778,6 +824,12 @@ border: none;
         """
         Charge une session depuis un fichier
         """
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.information(self, "Fonctionnalité non disponible",
+                                   "La gestion de session n'est pas disponible en mode validation de plaque.\n\n"
+                                   "Cette fonctionnalité est réservée au mode installation complète.")
+            return
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Charger une session",
@@ -812,6 +864,12 @@ border: none;
         """
         Sauvegarde la session dans un fichier
         """
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.information(self, "Fonctionnalité non disponible",
+                                   "La gestion de session n'est pas disponible en mode validation de plaque.\n\n"
+                                   "Cette fonctionnalité est réservée au mode installation complète.")
+            return
+
         # Sauvegarde des données de l'étape actuelle
         self.steps[self.current_step_index].save_data()
 
@@ -957,12 +1015,20 @@ border: none;
             self.nav_widget.setVisible(False)
             self.validation_only_action.setEnabled(False)
             self.full_mode_action.setEnabled(True)
+            # Désactiver les actions de session en mode validation only
+            self.new_session_action.setEnabled(False)
+            self.load_session_action.setEnabled(False)
+            self.save_session_action.setEnabled(False)
         else:
             self.setWindowTitle(APP_CONFIG['title'])
             self.left_column.setVisible(True)
             self.nav_widget.setVisible(True)
             self.validation_only_action.setEnabled(True)
             self.full_mode_action.setEnabled(False)
+            # Réactiver les actions de session en mode full
+            self.new_session_action.setEnabled(True)
+            self.load_session_action.setEnabled(True)
+            self.save_session_action.setEnabled(True)
 
         # Réinitialiser les étapes
         self.initialize_steps()

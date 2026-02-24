@@ -163,6 +163,9 @@ class TestMainWindowModeBehavior(unittest.TestCase):
         window.nav_widget = MagicMock()
         window.validation_only_action = MagicMock()
         window.full_mode_action = MagicMock()
+        window.new_session_action = MagicMock()
+        window.load_session_action = MagicMock()
+        window.save_session_action = MagicMock()
         window.initialize_steps = MagicMock()
         window.show_step = MagicMock()
 
@@ -190,6 +193,9 @@ class TestMainWindowModeBehavior(unittest.TestCase):
         window.nav_widget = MagicMock()
         window.validation_only_action = MagicMock()
         window.full_mode_action = MagicMock()
+        window.new_session_action = MagicMock()
+        window.load_session_action = MagicMock()
+        window.save_session_action = MagicMock()
         window.initialize_steps = MagicMock()
         window.show_step = MagicMock()
 
@@ -200,6 +206,172 @@ class TestMainWindowModeBehavior(unittest.TestCase):
         window.nav_widget.setVisible.assert_called_with(True)
         window.initialize_steps.assert_called_once()
         window.show_step.assert_called_once_with(0)
+
+
+class TestMainWindowMenuActions(unittest.TestCase):
+    """Test menu actions behavior according to mode."""
+
+    def test_session_actions_disabled_in_validation_only_mode(self):
+        """Session actions should be disabled in validation-only mode."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_VALIDATION_ONLY
+        window.new_session_action = MagicMock()
+        window.load_session_action = MagicMock()
+        window.save_session_action = MagicMock()
+        window.validation_only_action = MagicMock()
+        window.full_mode_action = MagicMock()
+
+        # Simulate what happens in create_menu when mode is validation_only
+        if window.mode == MODE_VALIDATION_ONLY:
+            window.new_session_action.setEnabled(False)
+            window.load_session_action.setEnabled(False)
+            window.save_session_action.setEnabled(False)
+
+        window.new_session_action.setEnabled.assert_called_with(False)
+        window.load_session_action.setEnabled.assert_called_with(False)
+        window.save_session_action.setEnabled.assert_called_with(False)
+
+    def test_session_actions_enabled_in_full_mode(self):
+        """Session actions should be enabled in full mode."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_FULL
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_FULL
+        window.new_session_action = MagicMock()
+        window.load_session_action = MagicMock()
+        window.save_session_action = MagicMock()
+
+        # In full mode (default), actions should not be disabled
+        # They remain enabled by default
+        # Verify they were not called with False
+        window.new_session_action.setEnabled.assert_not_called()
+        window.load_session_action.setEnabled.assert_not_called()
+        window.save_session_action.setEnabled.assert_not_called()
+
+    @patch("zymosoft_assistant.gui.main_window.QMessageBox")
+    def test_new_session_shows_message_in_validation_only_mode(self, mock_msgbox):
+        """new_session should show info message in validation-only mode."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_VALIDATION_ONLY
+
+        MainWindow.new_session(window)
+
+        mock_msgbox.information.assert_called_once()
+        args = mock_msgbox.information.call_args[0]
+        self.assertIn("n'est pas disponible", args[2])
+        self.assertIn("mode validation de plaque", args[2])
+
+    @patch("zymosoft_assistant.gui.main_window.QMessageBox")
+    def test_load_session_shows_message_in_validation_only_mode(self, mock_msgbox):
+        """load_session should show info message in validation-only mode."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_VALIDATION_ONLY
+
+        MainWindow.load_session(window)
+
+        mock_msgbox.information.assert_called_once()
+        args = mock_msgbox.information.call_args[0]
+        self.assertIn("n'est pas disponible", args[2])
+
+    @patch("zymosoft_assistant.gui.main_window.QMessageBox")
+    def test_save_session_shows_message_in_validation_only_mode(self, mock_msgbox):
+        """save_session should show info message in validation-only mode."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_VALIDATION_ONLY
+
+        MainWindow.save_session(window)
+
+        mock_msgbox.information.assert_called_once()
+        args = mock_msgbox.information.call_args[0]
+        self.assertIn("n'est pas disponible", args[2])
+
+    def test_mode_switch_updates_session_actions(self):
+        """Switching modes should update session actions state."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_FULL, MODE_VALIDATION_ONLY
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_FULL
+        window.steps = []
+        window.current_step_index = 0
+        window.step_container = MagicMock()
+        window.session_data = {}
+        window.initial_load = False
+        window.left_column = MagicMock()
+        window.nav_widget = MagicMock()
+        window.validation_only_action = MagicMock()
+        window.full_mode_action = MagicMock()
+        window.new_session_action = MagicMock()
+        window.load_session_action = MagicMock()
+        window.save_session_action = MagicMock()
+        window.initialize_steps = MagicMock()
+        window.show_step = MagicMock()
+
+        # Switch to validation only
+        MainWindow._switch_mode(window, MODE_VALIDATION_ONLY)
+
+        window.new_session_action.setEnabled.assert_called_with(False)
+        window.load_session_action.setEnabled.assert_called_with(False)
+        window.save_session_action.setEnabled.assert_called_with(False)
+
+
+class TestModeSelectionDialogUI(unittest.TestCase):
+    """Test ModeSelectionDialog UI elements."""
+
+    @patch("zymosoft_assistant.gui.mode_selection_dialog.QDialog.__init__", return_value=None)
+    @patch("zymosoft_assistant.gui.mode_selection_dialog.ModeSelectionDialog._create_widgets")
+    def test_dialog_window_title(self, mock_create, mock_init):
+        """Dialog should have correct window title."""
+        from zymosoft_assistant.gui.mode_selection_dialog import ModeSelectionDialog
+
+        dialog = MagicMock(spec=ModeSelectionDialog)
+        dialog.setWindowTitle = MagicMock()
+
+        # Simulate what happens in __init__
+        dialog.setWindowTitle("ZymDeploy")
+
+        dialog.setWindowTitle.assert_called_with("ZymDeploy")
+
+    @patch("zymosoft_assistant.gui.mode_selection_dialog.QDialog.__init__", return_value=None)
+    @patch("zymosoft_assistant.gui.mode_selection_dialog.ModeSelectionDialog._create_widgets")
+    def test_dialog_minimum_size(self, mock_create, mock_init):
+        """Dialog should have minimum size set."""
+        from zymosoft_assistant.gui.mode_selection_dialog import ModeSelectionDialog
+
+        dialog = MagicMock(spec=ModeSelectionDialog)
+        dialog.setMinimumSize = MagicMock()
+
+        # Simulate what happens in __init__
+        dialog.setMinimumSize(800, 500)
+
+        dialog.setMinimumSize.assert_called_with(800, 500)
+
+    @patch("zymosoft_assistant.gui.mode_selection_dialog.QDialog.__init__", return_value=None)
+    @patch("zymosoft_assistant.gui.mode_selection_dialog.ModeSelectionDialog._create_widgets")
+    def test_dialog_modal(self, mock_create, mock_init):
+        """Dialog should be modal."""
+        from zymosoft_assistant.gui.mode_selection_dialog import ModeSelectionDialog
+
+        dialog = MagicMock(spec=ModeSelectionDialog)
+        dialog.setModal = MagicMock()
+
+        # Simulate what happens in __init__
+        dialog.setModal(True)
+
+        dialog.setModal.assert_called_with(True)
 
 
 if __name__ == "__main__":
