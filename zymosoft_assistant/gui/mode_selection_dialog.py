@@ -113,12 +113,7 @@ class ModeSelectionDialog(QDialog):
         )
         cards_layout.addWidget(self.validation_mode_card)
         
-        self.validation_mode_card = self._create_module_card(
-            "Validation de Plaque",
-            "Valider rapidement une plaque d'acquisition : sélection des dossiers, analyse des résultats et génération du rapport.",
-            MODE_VALIDATION_ONLY
-        )
-        cards_layout.addWidget(self.validation_mode_card)
+       
 
         cards_main_layout.addStretch()
         content_layout.addWidget(cards_container)
