@@ -89,6 +89,7 @@ def check_numpy_version():
 #check_numpy_version()
 
 from zymosoft_assistant.gui.main_window import MainWindow
+from zymosoft_assistant.gui.mode_selection_dialog import ModeSelectionDialog, MODE_FULL
 from zymosoft_assistant.utils.helpers import resource_path
 from zymosoft_assistant.utils.constants import APP_CONFIG
 
@@ -121,8 +122,18 @@ def main():
         font.setPointSize(font.pointSize() + 2)  # Augmenter la taille de police par défaut
         app.setFont(font)
 
-        # Création et affichage de la fenêtre principale
-        main_window = MainWindow()
+        # Afficher le dialogue de sélection du mode
+        mode_dialog = ModeSelectionDialog()
+        mode_dialog.showMaximized()
+        if mode_dialog.exec_() != ModeSelectionDialog.Accepted:
+            logger.info("L'utilisateur a fermé le dialogue de sélection du mode")
+            return 0
+
+        selected_mode = mode_dialog.selected_mode
+        logger.info(f"Mode sélectionné : {selected_mode}")
+
+        # Création et affichage de la fenêtre principale avec le mode sélectionné
+        main_window = MainWindow(mode=selected_mode)
         main_window.show()
 
         # Lancement de la boucle d'événements

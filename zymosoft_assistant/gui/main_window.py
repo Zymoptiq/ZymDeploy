@@ -16,6 +16,7 @@ from PyQt5.QtGui import QIcon
 from zymosoft_assistant.utils.constants import COLOR_SCHEME, APP_CONFIG, STEPS, PLATE_TYPES, ACQUISITION_MODES
 from zymosoft_assistant.utils.helpers import create_empty_session, save_session_data, load_session_data
 from .config_editor_dialog import ConfigEditorDialog
+from .mode_selection_dialog import MODE_FULL, MODE_VALIDATION_ONLY
 from .step1_info import Step1Info
 from .step2_checks import Step2Checks
 from .step3_acquisition import Step3Acquisition
@@ -29,13 +30,21 @@ class MainWindow(QMainWindow):
     Classe principale de l'interface graphique de l'assistant d'installation ZymoSoft
     """
 
-    def __init__(self):
+    def __init__(self, mode=MODE_FULL):
         """
         Initialise la fenêtre principale de l'application
+
+        Args:
+            mode: Mode de fonctionnement (MODE_FULL ou MODE_VALIDATION_ONLY)
         """
         super().__init__()
 
-        self.setWindowTitle(APP_CONFIG['title'])
+        self.mode = mode
+
+        if self.mode == MODE_VALIDATION_ONLY:
+            self.setWindowTitle(f"{APP_CONFIG['title']} - Validation de plaque")
+        else:
+            self.setWindowTitle(APP_CONFIG['title'])
         self.resize(APP_CONFIG['window_width'], APP_CONFIG['window_height'])
         self.setMinimumSize(APP_CONFIG['min_width'], APP_CONFIG['min_height'])
         self.initial_load = True
@@ -133,8 +142,8 @@ class MainWindow(QMainWindow):
 
             /* Menu bar - bordure bas et fond uniforme */
             QMenuBar {{
-background-color: #f5f6fa;                
-border: none;
+                background-color: #f5f6fa;                
+                border: none;
                 color: {COLOR_SCHEME['text']};
                 padding: 0px;
                 margin: 0px;
@@ -145,11 +154,45 @@ border: none;
             QMenuBar::item {{
                 background-color: transparent;
                 padding: 5px 10px;
+                color: {COLOR_SCHEME['text']};
             }}
 
             QMenuBar::item:selected {{
                 background-color: {COLOR_SCHEME['primary']};
                 color: white;
+            }}
+
+            QMenuBar::item:pressed {{
+                background-color: {COLOR_SCHEME['primary_pressed']};
+            }}
+
+            /* Menu déroulant */
+            QMenu {{
+                background-color: white;
+                border: 1px solid {COLOR_SCHEME['border']};
+                padding: 5px 0px;
+            }}
+
+            QMenu::item {{
+                padding: 8px 25px 8px 20px;
+                color: {COLOR_SCHEME['text']};
+                background-color: transparent;
+            }}
+
+            QMenu::item:selected {{
+                background-color: {COLOR_SCHEME['primary']};
+                color: white;
+            }}
+
+            QMenu::item:disabled {{
+                color: {COLOR_SCHEME['text_secondary']};
+                background-color: #f5f5f5;
+            }}
+
+            QMenu::separator {{
+                height: 1px;
+                background-color: {COLOR_SCHEME['border']};
+                margin: 5px 0px;
             }}
 
             /* Sidebar (colonne de gauche) */
@@ -310,13 +353,13 @@ border: none;
         self.main_layout.addLayout(main_horizontal_layout)
 
         # Sidebar (colonne de gauche)
-        left_column = QWidget()
-        left_column_layout = QVBoxLayout(left_column)
+        self.left_column = QWidget()
+        left_column_layout = QVBoxLayout(self.left_column)
         left_column_layout.setContentsMargins(0, 0, 0, 0)
         left_column_layout.setSpacing(0)
-        left_column.setFixedWidth(80)  # Largeur un peu plus large pour une vraie sidebar
-        left_column.setObjectName("leftColumn")
-        main_horizontal_layout.addWidget(left_column)
+        self.left_column.setFixedWidth(80)  # Largeur un peu plus large pour une vraie sidebar
+        self.left_column.setObjectName("leftColumn")
+        main_horizontal_layout.addWidget(self.left_column)
 
         # Barre de progression
         self.progress_bar = QProgressBar()
@@ -374,10 +417,10 @@ border: none;
         right_column_layout.addWidget(self.step_container, 1)
 
         # Barre de navigation en bas
-        nav_widget = QWidget()
-        nav_layout = QHBoxLayout(nav_widget)
-        nav_widget.setObjectName("navigationBar")
-        right_column_layout.addWidget(nav_widget)
+        self.nav_widget = QWidget()
+        nav_layout = QHBoxLayout(self.nav_widget)
+        self.nav_widget.setObjectName("navigationBar")
+        right_column_layout.addWidget(self.nav_widget)
 
         self.prev_button = QPushButton("Précédent")
         self.prev_button.clicked.connect(self.previous_step)
@@ -399,6 +442,11 @@ border: none;
         self.status_label = QLabel("Prêt")
         status_layout.addWidget(self.status_label)
 
+        # En mode validation seule, masquer la sidebar et la barre de navigation wizard
+        if self.mode == MODE_VALIDATION_ONLY:
+            self.left_column.setVisible(False)
+            self.nav_widget.setVisible(False)
+
     def create_menu(self):
         """
         Crée le menu de l'application
@@ -408,17 +456,17 @@ border: none;
         # Menu Fichier
         file_menu = menubar.addMenu("Fichier")
 
-        new_session_action = QAction("Nouvelle session", self)
-        new_session_action.triggered.connect(self.new_session)
-        file_menu.addAction(new_session_action)
+        self.new_session_action = QAction("Nouvelle session", self)
+        self.new_session_action.triggered.connect(self.new_session)
+        file_menu.addAction(self.new_session_action)
 
-        load_session_action = QAction("Charger session", self)
-        load_session_action.triggered.connect(self.load_session)
-        file_menu.addAction(load_session_action)
+        self.load_session_action = QAction("Charger session", self)
+        self.load_session_action.triggered.connect(self.load_session)
+        file_menu.addAction(self.load_session_action)
 
-        save_session_action = QAction("Sauvegarder session", self)
-        save_session_action.triggered.connect(self.save_session)
-        file_menu.addAction(save_session_action)
+        self.save_session_action = QAction("Sauvegarder session", self)
+        self.save_session_action.triggered.connect(self.save_session)
+        file_menu.addAction(self.save_session_action)
 
         file_menu.addSeparator()
 
@@ -434,6 +482,28 @@ border: none;
         self.edit_config_action.triggered.connect(self.open_config_editor)
         self.edit_config_action.setEnabled(False)  # Désactivé par défaut
         actions_menu.addAction(self.edit_config_action)
+
+        actions_menu.addSeparator()
+
+        # Action pour basculer vers le mode validation de plaque seule
+        self.validation_only_action = QAction("Validation de plaque seule", self)
+        self.validation_only_action.triggered.connect(self.switch_to_validation_only_mode)
+        if self.mode == MODE_VALIDATION_ONLY:
+            self.validation_only_action.setEnabled(False)
+        actions_menu.addAction(self.validation_only_action)
+
+        # Action pour revenir au mode complet
+        self.full_mode_action = QAction("Mode installation complète", self)
+        self.full_mode_action.triggered.connect(self.switch_to_full_mode)
+        if self.mode == MODE_FULL:
+            self.full_mode_action.setEnabled(False)
+        actions_menu.addAction(self.full_mode_action)
+
+        # Désactiver les actions de session en mode validation only
+        if self.mode == MODE_VALIDATION_ONLY:
+            self.new_session_action.setEnabled(False)
+            self.load_session_action.setEnabled(False)
+            self.save_session_action.setEnabled(False)
 
         # Menu Aide
         help_menu = menubar.addMenu("Aide")
@@ -453,33 +523,42 @@ border: none;
         logger.info("Initialisation des étapes de l'assistant")
 
         try:
-            # Étape 1: Saisie des informations client
-            logger.info("Initialisation de l'étape 1: Saisie des informations client")
-            step1 = Step1Info(self.step_container, self)
-            self.step_container.addWidget(step1.widget)
-            self.steps.append(step1)
-            logger.info("Étape 1 initialisée avec succès")
+            if self.mode == MODE_VALIDATION_ONLY:
+                # Mode validation de plaque seule : uniquement l'étape 3
+                logger.info("Mode validation de plaque seule - Initialisation de l'étape de validation")
+                step3 = Step3Acquisition(self.step_container, self)
+                self.step_container.addWidget(step3.widget)
+                self.steps.append(step3)
+                logger.info("Étape de validation initialisée avec succès")
+            else:
+                # Mode installation complète : toutes les étapes
+                # Étape 1: Saisie des informations client
+                logger.info("Initialisation de l'étape 1: Saisie des informations client")
+                step1 = Step1Info(self.step_container, self)
+                self.step_container.addWidget(step1.widget)
+                self.steps.append(step1)
+                logger.info("Étape 1 initialisée avec succès")
 
-            # Étape 2: Vérifications pré-validation
-            logger.info("Initialisation de l'étape 2: Vérifications pré-validation")
-            step2 = Step2Checks(self.step_container, self)
-            self.step_container.addWidget(step2.widget)
-            self.steps.append(step2)
-            logger.info("Étape 2 initialisée avec succès")
+                # Étape 2: Vérifications pré-validation
+                logger.info("Initialisation de l'étape 2: Vérifications pré-validation")
+                step2 = Step2Checks(self.step_container, self)
+                self.step_container.addWidget(step2.widget)
+                self.steps.append(step2)
+                logger.info("Étape 2 initialisée avec succès")
 
-            # Étape 3: Validation par acquisitions
-            logger.info("Initialisation de l'étape 3: Validation par acquisitions")
-            step3 = Step3Acquisition(self.step_container, self)
-            self.step_container.addWidget(step3.widget)
-            self.steps.append(step3)
-            logger.info("Étape 3 initialisée avec succès")
+                # Étape 3: Validation par acquisitions
+                logger.info("Initialisation de l'étape 3: Validation par acquisitions")
+                step3 = Step3Acquisition(self.step_container, self)
+                self.step_container.addWidget(step3.widget)
+                self.steps.append(step3)
+                logger.info("Étape 3 initialisée avec succès")
 
-            # Étape 4: Clôture de l'installation
-            logger.info("Initialisation de l'étape 4: Clôture de l'installation")
-            step4 = Step4Closure(self.step_container, self)
-            self.step_container.addWidget(step4.widget)
-            self.steps.append(step4)
-            logger.info("Étape 4 initialisée avec succès")
+                # Étape 4: Clôture de l'installation
+                logger.info("Initialisation de l'étape 4: Clôture de l'installation")
+                step4 = Step4Closure(self.step_container, self)
+                self.step_container.addWidget(step4.widget)
+                self.steps.append(step4)
+                logger.info("Étape 4 initialisée avec succès")
 
             logger.info("Toutes les étapes ont été initialisées avec succès")
         except Exception as e:
@@ -508,6 +587,23 @@ border: none;
             self.step_container.setCurrentIndex(index)
             self.current_step_index = index
 
+            if self.mode == MODE_VALIDATION_ONLY:
+                # Mode validation seule : titre et description dédiés
+                self.step_title_label.setText("Validation de plaque")
+                self.step_description_label.setText("Réalisation et analyse des acquisitions de validation")
+                self.status_label.setText("Mode validation de plaque")
+
+                if self.initial_load and index == 0:
+                    self.initial_load = False
+
+                # Appeler la méthode on_show de l'étape si elle existe
+                if hasattr(self.steps[index], 'on_show') and callable(getattr(self.steps[index], 'on_show')):
+                    self.steps[index].on_show()
+
+                logger.info("Affichage de l'étape de validation de plaque réussi")
+                return
+
+            # Mode complet : comportement standard
             # Mise à jour du titre et de la description de l'étape
             self.step_title_label.setText(STEPS[index]['title'])
             self.step_description_label.setText(STEPS[index]['description'])
@@ -704,6 +800,12 @@ border: none;
         """
         Crée une nouvelle session
         """
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.information(self, "Fonctionnalité non disponible",
+                                   "La gestion de session n'est pas disponible en mode validation de plaque.\n\n"
+                                   "Cette fonctionnalité est réservée au mode installation complète.")
+            return
+
         reply = QMessageBox.question(self, "Nouvelle session",
                                      "Êtes-vous sûr de vouloir créer une nouvelle session ? "
                                      "Toutes les données non sauvegardées seront perdues.",
@@ -722,6 +824,12 @@ border: none;
         """
         Charge une session depuis un fichier
         """
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.information(self, "Fonctionnalité non disponible",
+                                   "La gestion de session n'est pas disponible en mode validation de plaque.\n\n"
+                                   "Cette fonctionnalité est réservée au mode installation complète.")
+            return
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Charger une session",
@@ -756,6 +864,12 @@ border: none;
         """
         Sauvegarde la session dans un fichier
         """
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.information(self, "Fonctionnalité non disponible",
+                                   "La gestion de session n'est pas disponible en mode validation de plaque.\n\n"
+                                   "Cette fonctionnalité est réservée au mode installation complète.")
+            return
+
         # Sauvegarde des données de l'étape actuelle
         self.steps[self.current_step_index].save_data()
 
@@ -800,6 +914,12 @@ border: none;
         """
         logger.info("Tentative d'ouverture du dialogue d'édition du fichier config.ini")
 
+        # En mode validation seule, pas de Step 2 disponible
+        if self.mode == MODE_VALIDATION_ONLY:
+            QMessageBox.warning(self, "Action non disponible",
+                               "Cette action n'est disponible qu'en mode installation complète.")
+            return
+
         # Vérifier si l'étape 2 a été complétée ou si un scan a été lancé
         if self.current_step_index < 1:  # Si on n'est pas encore à l'étape 2
             QMessageBox.warning(self, "Action non disponible", 
@@ -835,6 +955,86 @@ border: none;
             logger.error(f"Erreur lors de l'ouverture du dialogue d'édition: {str(e)}", exc_info=True)
             QMessageBox.critical(self, "Erreur", 
                                 f"Une erreur est survenue lors de l'ouverture du dialogue d'édition:\n{str(e)}")
+
+    def switch_to_validation_only_mode(self):
+        """
+        Bascule vers le mode validation de plaque seule.
+        Reconfigure la fenêtre pour n'afficher que l'étape de validation.
+        """
+        reply = QMessageBox.question(
+            self, "Changer de mode",
+            "Voulez-vous passer en mode validation de plaque seule ?\n\n"
+            "Les données non sauvegardées de la session actuelle seront perdues.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        logger.info("Basculement vers le mode validation de plaque seule")
+        self._switch_mode(MODE_VALIDATION_ONLY)
+
+    def switch_to_full_mode(self):
+        """
+        Bascule vers le mode installation complète.
+        Reconfigure la fenêtre pour afficher toutes les étapes.
+        """
+        reply = QMessageBox.question(
+            self, "Changer de mode",
+            "Voulez-vous passer en mode installation complète ?\n\n"
+            "Les données non sauvegardées de la session actuelle seront perdues.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        logger.info("Basculement vers le mode installation complète")
+        self._switch_mode(MODE_FULL)
+
+    def _switch_mode(self, new_mode):
+        """
+        Effectue le basculement de mode.
+
+        Args:
+            new_mode: Le nouveau mode (MODE_FULL ou MODE_VALIDATION_ONLY)
+        """
+        self.mode = new_mode
+
+        # Nettoyer les étapes existantes
+        for step in self.steps:
+            self.step_container.removeWidget(step.widget)
+            step.widget.deleteLater()
+        self.steps = []
+        self.current_step_index = 0
+
+        # Réinitialiser les données de session
+        self.session_data = create_empty_session()
+        self.initial_load = True
+
+        # Reconfigurer l'interface
+        if self.mode == MODE_VALIDATION_ONLY:
+            self.setWindowTitle(f"{APP_CONFIG['title']} - Validation de plaque")
+            self.left_column.setVisible(False)
+            self.nav_widget.setVisible(False)
+            self.validation_only_action.setEnabled(False)
+            self.full_mode_action.setEnabled(True)
+            # Désactiver les actions de session en mode validation only
+            self.new_session_action.setEnabled(False)
+            self.load_session_action.setEnabled(False)
+            self.save_session_action.setEnabled(False)
+        else:
+            self.setWindowTitle(APP_CONFIG['title'])
+            self.left_column.setVisible(True)
+            self.nav_widget.setVisible(True)
+            self.validation_only_action.setEnabled(True)
+            self.full_mode_action.setEnabled(False)
+            # Réactiver les actions de session en mode full
+            self.new_session_action.setEnabled(True)
+            self.load_session_action.setEnabled(True)
+            self.save_session_action.setEnabled(True)
+
+        # Réinitialiser les étapes
+        self.initialize_steps()
+        self.show_step(0)
+
+        logger.info(f"Mode changé vers : {new_mode}")
 
     def quit_app(self):
         """
