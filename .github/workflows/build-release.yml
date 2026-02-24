@@ -120,6 +120,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Update version in constants.py
+        shell: pwsh
+        run: |
+          $file = "zymosoft_assistant\utils\constants.py"
+          $version = "${{ env.CLEAN_VERSION }}"
+          (Get-Content $file) -replace "'version': '[^']*'", "'version': '$version'" | Set-Content $file
+          Write-Host "Version updated to $version in $file"
+
       - name: Build executable with PyInstaller
         shell: pwsh
         run: |

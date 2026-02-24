@@ -130,7 +130,7 @@ class TestFileValidatorAcquisitionFolder(unittest.TestCase):
         with patch("builtins.open", unittest.mock.mock_open(read_data='profil="Layer"')):
             result = FileValidator.validate_acquisition_folder("/valid/path", is_expert_mode=True, plate_type="nanofilm")
             self.assertFalse(result["is_valid"])
-            self.assertIn("Mode expert: Le dossier doit contenir un sous-dossier 'Image'.", result["errors"])
+            self.assertIn("Mode expert: Le dossier doit contenir un sous-dossier 'Images'.", result["errors"])
 
     @patch("zymosoft_assistant.core.file_validator.os.path.isdir", return_value=True)
     @patch("zymosoft_assistant.core.file_validator.os.listdir", return_value=["data.csv"])
@@ -145,7 +145,7 @@ class TestFileValidatorAcquisitionFolder(unittest.TestCase):
     def test_validate_acquisition_folder_invalid_profile(self, mock_open, mock_listdir, mock_isdir):
         result = FileValidator.validate_acquisition_folder("/valid/path", is_expert_mode=False, plate_type="nanofilm")
         self.assertFalse(result["is_valid"])
-        self.assertIn('Le fichier .zym ne contient pas de profil valide (profil="Layer" ou profil="Dot").', result["errors"])
+        self.assertIn('Le fichier .zym ne contient pas de profil valide (profil attendu : "Layer" ou "Dot").', result["errors"])
 
     @patch("zymosoft_assistant.core.file_validator.os.path.isdir", return_value=True)
     @patch("zymosoft_assistant.core.file_validator.os.listdir", return_value=["test.zym"])
