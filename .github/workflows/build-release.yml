@@ -102,6 +102,8 @@ jobs:
           $CLEAN_VERSION = $VERSION -replace "^v", "" -replace "^test-", ""
           echo "CLEAN_VERSION=$CLEAN_VERSION" >> $env:GITHUB_ENV
           echo "clean_version=$CLEAN_VERSION" >> $env:GITHUB_OUTPUT
+          $EXE_NAME = "${{ env.APP_NAME }}-$CLEAN_VERSION"
+          echo "EXE_NAME=$EXE_NAME" >> $env:GITHUB_ENV
           
           Write-Host "Building version: $VERSION"
           Write-Host "Clean version: $CLEAN_VERSION"
@@ -130,9 +132,9 @@ jobs:
       - name: Build executable with PyInstaller
         shell: pwsh
         run: |
-          Write-Host "Building ${{ env.APP_NAME }} version ${{ env.VERSION }}..."
+          Write-Host "Building ${{ env.EXE_NAME }}.exe version ${{ env.VERSION }}..."
           
-          pyinstaller --name ${{ env.APP_NAME }} `
+          pyinstaller --name ${{ env.EXE_NAME }} `
                       --paths . `
                       --add-data "zymosoft_assistant\templates;zymosoft_assistant\templates" `
                       --add-data "zymosoft_assistant\assets\icons\icon.png;zymosoft_assistant\assets\icons" `
@@ -164,9 +166,9 @@ jobs:
           Write-Host "Build completed successfully!"
           
           # Vérifier que l'exécutable existe
-          if (Test-Path "dist\${{ env.APP_NAME }}.exe") {
-            $fileSize = (Get-Item "dist\${{ env.APP_NAME }}.exe").Length
-            Write-Host "Executable created: dist\${{ env.APP_NAME }}.exe (Size: $fileSize bytes)"
+          if (Test-Path "dist\${{ env.EXE_NAME }}.exe") {
+            $fileSize = (Get-Item "dist\${{ env.EXE_NAME }}.exe").Length
+            Write-Host "Executable created: dist\${{ env.EXE_NAME }}.exe (Size: $fileSize bytes)"
           } else {
             Write-Error "Executable not found!"
             exit 1
@@ -182,7 +184,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           
           # Copier l'exécutable
-          Copy-Item "dist\${{ env.APP_NAME }}.exe" -Destination "$packageDir\"
+          Copy-Item "dist\${{ env.EXE_NAME }}.exe" -Destination "$packageDir\"
           
           # Copier les fichiers de documentation
           if (Test-Path "README.md") {
@@ -207,7 +209,7 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-${{ env.CLEAN_VERSION }}
           path: |
-            dist/${{ env.APP_NAME }}.exe
+            dist/${{ env.EXE_NAME }}.exe
             dist/${{ env.APP_NAME }}-*.zip
           retention-days: 30
 
@@ -231,7 +233,7 @@ jobs:
             
             1. Téléchargez le fichier ZIP ci-dessous
             2. Extrayez l'archive
-            3. Lancez `${{ env.APP_NAME }}.exe`
+            3. Lancez `${{ env.EXE_NAME }}.exe`
             
             ### 📋 Prérequis
             
@@ -242,7 +244,7 @@ jobs:
             
             Cette version a été testée et validée automatiquement.
           files: |
-            dist/${{ env.APP_NAME }}.exe
+            dist/${{ env.EXE_NAME }}.exe
             dist/${{ env.APP_NAME }}-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
