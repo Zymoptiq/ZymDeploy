@@ -102,7 +102,7 @@ jobs:
           $CLEAN_VERSION = $VERSION -replace "^v", "" -replace "^test-", ""
           echo "CLEAN_VERSION=$CLEAN_VERSION" >> $env:GITHUB_ENV
           echo "clean_version=$CLEAN_VERSION" >> $env:GITHUB_OUTPUT
-          $EXE_NAME = "${{ env.APP_NAME }}-$CLEAN_VERSION"
+          $EXE_NAME = "${{ env.APP_NAME }}_v$CLEAN_VERSION"
           echo "EXE_NAME=$EXE_NAME" >> $env:GITHUB_ENV
           
           Write-Host "Building version: $VERSION"
