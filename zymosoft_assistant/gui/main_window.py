@@ -9,11 +9,12 @@ import os
 import logging
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QProgressBar, QMessageBox,
-                             QFileDialog, QStackedWidget, QAction, QMenu, QMenuBar, QDialog)
+                             QFileDialog, QStackedWidget, QAction, QMenu, QMenuBar, QDialog,
+                             QListWidget, QListWidgetItem, QAbstractItemView)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
-from zymosoft_assistant.utils.constants import COLOR_SCHEME, APP_CONFIG, STEPS, PLATE_TYPES, ACQUISITION_MODES
+from zymosoft_assistant.utils.constants import COLOR_SCHEME, APP_CONFIG, STEPS, PLATE_TYPES, ACQUISITION_MODES, REPORTS_DIR
 from zymosoft_assistant.utils.helpers import create_empty_session, save_session_data, load_session_data
 from .config_editor_dialog import ConfigEditorDialog
 from .mode_selection_dialog import MODE_FULL, MODE_VALIDATION_ONLY
@@ -23,6 +24,166 @@ from .step3_acquisition import Step3Acquisition
 from .step4_closure import Step4Closure
 
 logger = logging.getLogger(__name__)
+
+
+class ReportsCleanupDialog(QDialog):
+    """
+    Modal de nettoyage des rapports générés.
+    """
+
+    def __init__(self, reports_dir, parent=None):
+        super().__init__(parent)
+        self.reports_dir = reports_dir
+        self.setWindowTitle("Nettoyage des rapports")
+        self.setMinimumSize(900, 520)
+        self.deleted_count = 0
+
+        layout = QVBoxLayout(self)
+
+        info_text = (
+            f"Dossier analysé: {self.reports_dir}\n"
+            "Sélectionnez les rapports à supprimer."
+        )
+        self.info_label = QLabel(info_text)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+
+        self.summary_label = QLabel("")
+        layout.addWidget(self.summary_label)
+
+        self.reports_list = QListWidget()
+        self.reports_list.setSelectionMode(QAbstractItemView.NoSelection)
+        layout.addWidget(self.reports_list, 1)
+
+        actions_layout = QHBoxLayout()
+
+        self.refresh_button = QPushButton("Actualiser")
+        self.refresh_button.clicked.connect(self.refresh_reports)
+        actions_layout.addWidget(self.refresh_button)
+
+        self.select_all_button = QPushButton("Tout sélectionner")
+        self.select_all_button.clicked.connect(self.check_all_reports)
+        actions_layout.addWidget(self.select_all_button)
+
+        self.unselect_all_button = QPushButton("Tout désélectionner")
+        self.unselect_all_button.clicked.connect(self.uncheck_all_reports)
+        actions_layout.addWidget(self.unselect_all_button)
+
+        self.delete_button = QPushButton("Supprimer les cochés")
+        self.delete_button.clicked.connect(self.delete_checked_reports)
+        actions_layout.addWidget(self.delete_button)
+
+        actions_layout.addStretch()
+
+        self.close_button = QPushButton("Fermer")
+        self.close_button.clicked.connect(self.accept)
+        actions_layout.addWidget(self.close_button)
+
+        layout.addLayout(actions_layout)
+
+        self.refresh_reports()
+
+    def _collect_report_files(self):
+        report_files = []
+        if not os.path.isdir(self.reports_dir):
+            return report_files
+
+        for root, _, files in os.walk(self.reports_dir):
+            for file_name in files:
+                if file_name.lower().endswith(".pdf"):
+                    file_path = os.path.join(root, file_name)
+                    try:
+                        stats = os.stat(file_path)
+                        report_files.append({
+                            "path": file_path,
+                            "mtime": stats.st_mtime,
+                            "size": stats.st_size,
+                        })
+                    except OSError:
+                        continue
+
+        report_files.sort(key=lambda item: item["mtime"], reverse=True)
+        return report_files
+
+    def refresh_reports(self):
+        self.reports_list.clear()
+        report_files = self._collect_report_files()
+
+        for item in report_files:
+            relative_path = os.path.relpath(item["path"], self.reports_dir)
+            size_kb = item["size"] / 1024
+            display_text = f"{relative_path} ({size_kb:.1f} KB)"
+            list_item = QListWidgetItem(display_text)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.Unchecked)
+            list_item.setData(Qt.UserRole, item["path"])
+            self.reports_list.addItem(list_item)
+
+        if report_files:
+            self.summary_label.setText(f"{len(report_files)} rapport(s) trouvé(s).")
+            self.delete_button.setEnabled(True)
+            self.select_all_button.setEnabled(True)
+            self.unselect_all_button.setEnabled(True)
+        else:
+            self.summary_label.setText("Aucun rapport à nettoyer.")
+            self.delete_button.setEnabled(False)
+            self.select_all_button.setEnabled(False)
+            self.unselect_all_button.setEnabled(False)
+
+    def check_all_reports(self):
+        for index in range(self.reports_list.count()):
+            item = self.reports_list.item(index)
+            item.setCheckState(Qt.Checked)
+
+    def uncheck_all_reports(self):
+        for index in range(self.reports_list.count()):
+            item = self.reports_list.item(index)
+            item.setCheckState(Qt.Unchecked)
+
+    def delete_checked_reports(self):
+        checked_items = []
+        for index in range(self.reports_list.count()):
+            item = self.reports_list.item(index)
+            if item.checkState() == Qt.Checked:
+                checked_items.append(item)
+
+        if not checked_items:
+            QMessageBox.information(self, "Nettoyage", "Aucun rapport coché.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirmer la suppression",
+            f"Supprimer {len(checked_items)} rapport(s) coché(s) ?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        deleted = 0
+        errors = []
+        for item in checked_items:
+            path = item.data(Qt.UserRole)
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+                    deleted += 1
+            except Exception as e:
+                errors.append(f"{path}: {e}")
+
+        self.deleted_count += deleted
+        self.refresh_reports()
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Nettoyage partiel",
+                f"{deleted} rapport(s) supprimé(s), {len(errors)} erreur(s)."
+            )
+            logger.warning(f"Erreurs lors du nettoyage des rapports: {errors}")
+        else:
+            QMessageBox.information(self, "Nettoyage", f"{deleted} rapport(s) supprimé(s).")
 
 
 class MainWindow(QMainWindow):
@@ -67,6 +228,7 @@ class MainWindow(QMainWindow):
         # Création de l'interface
         self.create_widgets()
         self.create_menu()
+        self._update_cleanup_status()
 
         # Initialisation des étapes
         self.steps = []
@@ -442,10 +604,17 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Prêt")
         status_layout.addWidget(self.status_label)
 
+        self.cleanup_status_label = QLabel("")
+        self.cleanup_status_label.setStyleSheet(f"color: {COLOR_SCHEME['text_secondary']}; padding-left: 12px;")
+        status_layout.addWidget(self.cleanup_status_label)
+        status_layout.addStretch()
+
         # En mode validation seule, masquer la sidebar et la barre de navigation wizard
         if self.mode == MODE_VALIDATION_ONLY:
             self.left_column.setVisible(False)
             self.nav_widget.setVisible(False)
+        else:
+            self.cleanup_status_label.setVisible(False)
 
     def create_menu(self):
         """
@@ -493,11 +662,17 @@ class MainWindow(QMainWindow):
         actions_menu.addAction(self.validation_only_action)
 
         # Action pour revenir au mode complet
-        self.full_mode_action = QAction("Mode installation complète", self)
+        self.full_mode_action = QAction("Installation complète", self)
         self.full_mode_action.triggered.connect(self.switch_to_full_mode)
         if self.mode == MODE_FULL:
             self.full_mode_action.setEnabled(False)
         actions_menu.addAction(self.full_mode_action)
+
+        actions_menu.addSeparator()
+        self.clean_reports_action = QAction("Nettoyer les rapports...", self)
+        self.clean_reports_action.triggered.connect(self.open_reports_cleanup_dialog)
+        self.clean_reports_action.setVisible(self.mode == MODE_VALIDATION_ONLY)
+        actions_menu.addAction(self.clean_reports_action)
 
         # Désactiver les actions de session en mode validation only
         if self.mode == MODE_VALIDATION_ONLY:
@@ -592,6 +767,7 @@ class MainWindow(QMainWindow):
                 self.step_title_label.setText("Validation de plaque")
                 self.step_description_label.setText("Réalisation et analyse des acquisitions de validation")
                 self.status_label.setText("Mode validation de plaque")
+                self._update_cleanup_status()
 
                 if self.initial_load and index == 0:
                     self.initial_load = False
@@ -1013,6 +1189,10 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{APP_CONFIG['title']} - Validation de plaque")
             self.left_column.setVisible(False)
             self.nav_widget.setVisible(False)
+            if hasattr(self, "cleanup_status_label"):
+                self.cleanup_status_label.setVisible(True)
+            if hasattr(self, "clean_reports_action"):
+                self.clean_reports_action.setVisible(True)
             self.validation_only_action.setEnabled(False)
             self.full_mode_action.setEnabled(True)
             # Désactiver les actions de session en mode validation only
@@ -1023,6 +1203,10 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(APP_CONFIG['title'])
             self.left_column.setVisible(True)
             self.nav_widget.setVisible(True)
+            if hasattr(self, "cleanup_status_label"):
+                self.cleanup_status_label.setVisible(False)
+            if hasattr(self, "clean_reports_action"):
+                self.clean_reports_action.setVisible(False)
             self.validation_only_action.setEnabled(True)
             self.full_mode_action.setEnabled(False)
             # Réactiver les actions de session en mode full
@@ -1033,8 +1217,39 @@ class MainWindow(QMainWindow):
         # Réinitialiser les étapes
         self.initialize_steps()
         self.show_step(0)
+        self._update_cleanup_status()
 
         logger.info(f"Mode changé vers : {new_mode}")
+
+    def _collect_report_files(self):
+        report_files = []
+        if not os.path.isdir(REPORTS_DIR):
+            return report_files
+
+        for root, _, files in os.walk(REPORTS_DIR):
+            for file_name in files:
+                if file_name.lower().endswith(".pdf"):
+                    report_files.append(os.path.join(root, file_name))
+        return report_files
+
+    def _update_cleanup_status(self):
+        report_count = len(self._collect_report_files())
+        if hasattr(self, "clean_reports_action"):
+            self.clean_reports_action.setText(f"Nettoyer les rapports... ({report_count})")
+
+        if hasattr(self, "cleanup_status_label"):
+            if self.mode == MODE_VALIDATION_ONLY:
+                if report_count > 0:
+                    self.cleanup_status_label.setText(f"{report_count} document(s) à nettoyer.")
+                else:
+                    self.cleanup_status_label.setText("Aucun document à nettoyer.")
+            else:
+                self.cleanup_status_label.setText("")
+
+    def open_reports_cleanup_dialog(self):
+        dialog = ReportsCleanupDialog(REPORTS_DIR, self)
+        dialog.exec_()
+        self._update_cleanup_status()
 
     def quit_app(self):
         """

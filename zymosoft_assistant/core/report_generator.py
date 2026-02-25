@@ -621,7 +621,33 @@ class ReportGenerator:
         logger.info(f"Rapport de l'étape 2 généré: {pdf_path}")
         return pdf_path
 
+    def generate_acquisition_report_full(self, analysis: Dict[str, Any], step1_checks: Dict[str, Any]) -> str:
+        return self._generate_acquisition_report_template(
+            analysis,
+            step1_checks or {},
+            include_client_infos=True,
+            include_manual_checks=True
+        )
+
+    def generate_acquisition_report_validation(self, analysis: Dict[str, Any]) -> str:
+        return self._generate_acquisition_report_template(
+            analysis,
+            {},
+            include_client_infos=False,
+            include_manual_checks=False
+        )
+
     def generate_acquisition_report(self, analysis: Dict[str, Any], step1_checks: Dict[str, Any]) -> str:
+        if step1_checks:
+            return self.generate_acquisition_report_full(analysis, step1_checks)
+        return self.generate_acquisition_report_validation(analysis)
+
+    def _generate_acquisition_report_template(
+            self,
+            analysis: Dict[str, Any],
+            step1_checks: Dict[str, Any],
+            include_client_infos: bool = True,
+            include_manual_checks: bool = True) -> str:
         """
         Génère un rapport PDF pour une acquisition (étape 3)
 
@@ -680,11 +706,21 @@ class ReportGenerator:
             elements.append(Paragraph(f"Installation ID: {installation_id}", styles['normal']))
             elements.append(Spacer(1, 0.25 * inch))
 
-            # Client informations
-            add_client_infos(step1_checks, elements, styles, total_width)
+            section_number = 1
 
-            # 1. Informations sur l'acquisition
-            elements.append(Paragraph("2. Informations sur l'acquisition", styles['heading1']))
+            # Client informations
+            if include_client_infos and step1_checks:
+                add_client_infos(step1_checks, elements, styles, total_width)
+                section_number += 1
+
+            def add_heading_1(section_title):
+                nonlocal section_number
+                current = section_number
+                elements.append(Paragraph(f"{current}. {section_title}", styles['heading1']))
+                section_number += 1
+                return current
+
+            add_heading_1("Informations sur l'acquisition")
 
             # Tableau des informations
             data = [
@@ -712,10 +748,10 @@ class ReportGenerator:
 
             col_widths = [total_width * 0.3, total_width * 0.5, total_width * 0.2]
 
-            # 2. Vérifications manuelles
+            # Vérifications manuelles
             manual_validation = analysis.get("manual_validation", {})
-            if manual_validation:
-                elements.append(Paragraph("3. Vérifications manuelles", styles['heading1']))
+            if include_manual_checks and manual_validation:
+                add_heading_1("Vérifications manuelles")
                 manual_data = [["Paramètre", "Critère", "Statut"]]
                 manual_checks = {
                     'time': "Temps d'acquisition",
@@ -738,15 +774,13 @@ class ReportGenerator:
                 elements.append(Paragraph(comments if comments else "-----------------", styles['normal']))
                 elements.append(Spacer(1, 0.15 * inch))
 
-            # 3. Comparaison à la référence (avec contexte nanofilm/micro-dépôt)
+            # Comparaison à la référence (avec contexte nanofilm/micro-dépôt)
             validation = analysis.get("analysis", {}).get("validation", {})
             if validation and "comparison" in validation:
                 # Titre contextualisé selon le type de plaque
-                comparison_title = f"4. Comparaison à la référence, {type_description}"
-                elements.append(Paragraph(comparison_title, styles['heading1']))
-
-                # 3.1 Résumé de la comparaison
-                elements.append(Paragraph("4.1 Résumé de la comparaison", styles['heading2']))
+                comparison_section_num = add_heading_1(f"Comparaison à la référence, {type_description}")
+                # Résumé de la comparaison
+                elements.append(Paragraph(f"{comparison_section_num}.1 Résumé de la comparaison", styles['heading2']))
 
                 # Import des critères de validation
                 from zymosoft_assistant.utils.constants import VALIDATION_CRITERIA
@@ -811,19 +845,19 @@ class ReportGenerator:
                 elements.append(validation_table)
                 elements.append(Spacer(1, 0.15 * inch))
 
-                # 3.2 Graphiques de comparaison aux références
-                elements.append(Paragraph("4.2 Graphiques de comparaison", styles['heading2']))
+                # Graphiques de comparaison aux références
+                elements.append(Paragraph(f"{comparison_section_num}.2 Graphiques de comparaison", styles['heading2']))
                 self._add_reference_comparison_graphs(elements, analysis, total_width)
 
-            # 5. Comparaison des gammes de calibration
+            # Comparaison des gammes de calibration
             if validation and "well_results_comparison" in validation:
-                elements.append(Paragraph("5. Comparaison des gammes de calibration", styles['heading1']))
+                well_results_section_num = add_heading_1("Comparaison des gammes de calibration")
 
                 try:
                     well_results_df = pd.DataFrame(validation["well_results_comparison"])
 
-                    # 5.1 Résumé
-                    elements.append(Paragraph("5.1 Résumé", styles['heading2']))
+                    # Résumé
+                    elements.append(Paragraph(f"{well_results_section_num}.1 Résumé", styles['heading2']))
                     elements.append(Paragraph("Une mesure est valide si elle se situe dans l'intervalle [valeur de référence - tolérance, valeur de référence + tolérance], où la tolérance est de 5 unités pour une valeur de référence ≤ 0, varie linéairement de 5 à 3 unités pour une valeur entre 0 et 5, de 3 à 2 unités pour une valeur entre 5 et 10, et reste fixe à 2 unités pour une valeur > 10.", styles['normal']))
                     elements.append(Spacer(1, 0.15 * cm))
 
@@ -867,13 +901,13 @@ class ReportGenerator:
                     elements.append(well_results_table)
                     elements.append(Spacer(1, 0.15 * inch))
 
-                    # 5.2 Graphiques des gammes de calibration enzymatique
-                    elements.append(Paragraph("5.2 Graphiques des gammes de calibration", styles['heading2']))
+                    # Graphiques des gammes de calibration enzymatique
+                    elements.append(Paragraph(f"{well_results_section_num}.2 Graphiques des gammes de calibration", styles['heading2']))
                     self._add_enzymatic_calibration_graphs(elements, analysis, total_width)
 
-                    # 5.3 Statistiques de comparaison des gammes de calibration
+                    # Statistiques de comparaison des gammes de calibration
                     if not well_results_df.empty:
-                        elements.append(Paragraph("5.3 Statistiques de comparaison", styles['heading2']))
+                        elements.append(Paragraph(f"{well_results_section_num}.3 Statistiques de comparaison", styles['heading2']))
 
                         # Calculer les statistiques globales
                         diff_mean = well_results_df['CV'].mean() if 'CV' in well_results_df.columns else 0
@@ -904,9 +938,9 @@ class ReportGenerator:
                         Paragraph(f"Erreur lors de l'affichage des résultats de puits: {str(e)}", styles['normal']))
                     elements.append(Spacer(1, 0.15 * inch))
 
-            # 6. Comparaison des LOD/LOQ avec nouveaux en-têtes
+            # Comparaison des LOD/LOQ avec nouveaux en-têtes
             if validation and "lod_loq_comparison" in validation:
-                elements.append(Paragraph("6. Comparaison des LOD/LOQ", styles['heading1']))
+                add_heading_1("Comparaison des LOD/LOQ")
 
                 try:
                     lod_loq_df = pd.DataFrame(validation["lod_loq_comparison"])
@@ -957,10 +991,10 @@ class ReportGenerator:
                     elements.append(Paragraph(f"Erreur lors de l'affichage des LOD/LOQ: {str(e)}", styles['normal']))
                     elements.append(Spacer(1, 0.15 * inch))
 
-            # 6. Analyse technique (sans sous-section 6.1 s'il n'y a qu'une seule analyse)
+            # Analyse technique (sans sous-section 6.1 s'il n'y a qu'une seule analyse)
             log_analysis = analysis.get("analysis", {}).get("log_analysis", {})
             if log_analysis:
-                elements.append(Paragraph("7. Analyse technique", styles['heading1']))
+                add_heading_1("Analyse technique")
 
                 # Type d'acquisition et durée
                 acquisition_type = log_analysis.get("acquisition_type", "inconnu")
@@ -993,7 +1027,7 @@ class ReportGenerator:
                 elements.append(log_table)
                 elements.append(Spacer(1, 0.15 * inch))
 
-            # 7. Problèmes détectés (seulement s'il y a vraiment des erreurs)
+            # Problèmes détectés (seulement s'il y a vraiment des erreurs)
             errors = analysis.get("analysis", {}).get("errors", [])
             warnings = analysis.get("analysis", {}).get("warnings", [])
 
@@ -1002,16 +1036,16 @@ class ReportGenerator:
                                not error.startswith("Impossible de charger les données d'acquisition")]
 
             if filtered_errors or warnings:
-                elements.append(Paragraph("8. Problèmes détectés", styles['heading1']))
+                issues_section_num = add_heading_1("Problèmes détectés")
 
                 if filtered_errors:
-                    elements.append(Paragraph("8.1 Erreurs critiques", styles['heading2']))
+                    elements.append(Paragraph(f"{issues_section_num}.1 Erreurs critiques", styles['heading2']))
                     for error in filtered_errors:
                         elements.append(Paragraph(f"• <font color='red'>{error}</font>", styles['normal']))
                     elements.append(Spacer(1, 0.15 * inch))
 
                 if warnings:
-                    elements.append(Paragraph("8.2 Avertissements", styles['heading2']))
+                    elements.append(Paragraph(f"{issues_section_num}.2 Avertissements", styles['heading2']))
                     for warning in warnings:
                         elements.append(Paragraph(f"• <font color='orange'>{warning}</font>", styles['normal']))
                     elements.append(Spacer(1, 0.15 * inch))
@@ -1100,7 +1134,7 @@ class ReportGenerator:
         try:
             # Chercher les graphiques de comparaison aux références
             analysis_data = analysis.get("analysis", {})
-            results_folder = analysis_data.get("folder")
+            results_folder = analysis.get("folder") or analysis_data.get("folder")
             validation_dir = ""
             if results_folder:
                 validation_dir = os.path.join(results_folder, "validation_results", "validation_comparison")
@@ -1110,8 +1144,14 @@ class ReportGenerator:
             if os.path.exists(validation_dir):
                 reference_graphs = []
                 for file in os.listdir(validation_dir):
-                    if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        reference_graphs.append(os.path.join(validation_dir, file))
+                    file_path = os.path.join(validation_dir, file)
+                    if not os.path.isfile(file_path):
+                        continue
+                    lower_name = file.lower()
+                    if lower_name.endswith(('.png', '.jpg', '.jpeg')) or "." not in file:
+                        reference_graphs.append(file_path)
+
+                reference_graphs = sorted(reference_graphs)
 
                 if reference_graphs:
                     logger.info(f"{len(reference_graphs)} graphiques trouvés.")
@@ -1156,7 +1196,7 @@ class ReportGenerator:
         try:
             # Chercher les graphiques de comparaison enzymatique
             analysis_data = analysis.get("analysis", {})
-            results_folder = analysis_data.get("folder")
+            results_folder = analysis.get("folder") or analysis_data.get("folder")
             validation_dir = ""
             if results_folder:
                 validation_dir = os.path.join(results_folder, "validation_results", "comparaison_enzymo_routine")
@@ -1166,8 +1206,14 @@ class ReportGenerator:
             if os.path.exists(validation_dir):
                 enzymo_graphs = []
                 for file in os.listdir(validation_dir):
-                    if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        enzymo_graphs.append(os.path.join(validation_dir, file))
+                    file_path = os.path.join(validation_dir, file)
+                    if not os.path.isfile(file_path):
+                        continue
+                    lower_name = file.lower()
+                    if lower_name.endswith(('.png', '.jpg', '.jpeg')) or "." not in file:
+                        enzymo_graphs.append(file_path)
+
+                enzymo_graphs = sorted(enzymo_graphs)
 
                 if enzymo_graphs:
                     logger.info(f"{len(enzymo_graphs)} graphiques trouvés.")

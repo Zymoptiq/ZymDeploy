@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"d:/Projets/Zymoptiq/ZymDeploy\" log --oneline -10)",
+      "Bash(git -C \"d:/Projets/Zymoptiq/ZymDeploy\" show 6d6267a --stat)"
+    ]
+  }
+}

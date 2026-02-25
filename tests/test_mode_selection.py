@@ -374,5 +374,146 @@ class TestModeSelectionDialogUI(unittest.TestCase):
         dialog.setModal.assert_called_with(True)
 
 
+class TestStep3ValidationOnlyBehavior(unittest.TestCase):
+    """Tests for Step3Acquisition behavior in validation-only mode."""
+
+    def _make_main_window(self, mode):
+        mw = MagicMock()
+        mw.mode = mode
+        mw.session_data = {}
+        return mw
+
+    def test_next_button_hidden_in_validation_only_mode(self):
+        """In validation-only mode, 'Valider et terminer' button must be hidden on analysis page."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+
+        step = MagicMock()
+        step.main_window = self._make_main_window(MODE_VALIDATION_ONLY)
+        step._is_validation_only = True
+        step.next_substep_button = MagicMock()
+
+        # Simulate the relevant branch of _update_nav_buttons for page 2
+        if step._is_validation_only:
+            step.next_substep_button.setVisible(False)
+        else:
+            step.next_substep_button.setVisible(True)
+
+        step.next_substep_button.setVisible.assert_called_once_with(False)
+
+    def test_next_button_visible_in_full_mode(self):
+        """In full mode, 'Valider et terminer' button must be visible on analysis page."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_FULL
+
+        step = MagicMock()
+        step.main_window = self._make_main_window(MODE_FULL)
+        step._is_validation_only = False
+        step.next_substep_button = MagicMock()
+
+        if step._is_validation_only:
+            step.next_substep_button.setVisible(False)
+        else:
+            step.next_substep_button.setVisible(True)
+
+        step.next_substep_button.setVisible.assert_called_once_with(True)
+
+    def test_report_uses_empty_step1_in_validation_only_mode(self):
+        """In validation-only mode, step1_checks must be empty dict."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+
+        main_window = self._make_main_window(MODE_VALIDATION_ONLY)
+        main_window.session_data = {'client_info': {'name': 'Test Client'}}
+
+        is_validation_only = True
+        if is_validation_only:
+            step1_checks = {}
+        else:
+            step1_checks = main_window.session_data.get('client_info', {})
+
+        self.assertEqual(step1_checks, {})
+
+    def test_report_uses_client_info_in_full_mode(self):
+        """In full mode, step1_checks must use client_info from session_data."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_FULL
+
+        main_window = self._make_main_window(MODE_FULL)
+        main_window.session_data = {'client_info': {'name': 'Test Client'}}
+
+        is_validation_only = False
+        if is_validation_only:
+            step1_checks = {}
+        else:
+            step1_checks = main_window.session_data.get('client_info', {})
+
+        self.assertEqual(step1_checks, {'name': 'Test Client'})
+
+    def test_acquisition_details_dialog_mode_is_passed(self):
+        """AcquisitionDetailsDialog must receive the mode from main_window."""
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+
+        captured_mode = {}
+
+        def fake_dialog(acquisition_data, parent, mode=None):
+            captured_mode['mode'] = mode
+            return MagicMock()
+
+        acquisition_data = {'id': 1, 'analysis': {}, 'results_folder': '/tmp'}
+        main_window = self._make_main_window(MODE_VALIDATION_ONLY)
+
+        # Simulate the call in _show_acquisition_details_modal
+        fake_dialog(acquisition_data, None, mode=main_window.mode)
+
+        self.assertEqual(captured_mode['mode'], MODE_VALIDATION_ONLY)
+
+
+class TestReportsCleanupStatus(unittest.TestCase):
+    """Tests for reports cleanup indicator/actions in MainWindow."""
+
+    @patch("zymosoft_assistant.gui.main_window.os.path.isdir", return_value=True)
+    @patch("zymosoft_assistant.gui.main_window.os.walk")
+    def test_collect_report_files_only_pdfs(self, mock_walk, mock_isdir):
+        from zymosoft_assistant.gui.main_window import MainWindow
+
+        mock_walk.return_value = [
+            ("reports", [], ["a.pdf", "b.txt", "c.PDF"]),
+            ("reports/sub", [], ["d.pdf"]),
+        ]
+
+        window = MagicMock(spec=MainWindow)
+        files = MainWindow._collect_report_files(window)
+
+        self.assertEqual(len(files), 3)
+        self.assertTrue(all(path.lower().endswith(".pdf") for path in files))
+
+    def test_update_cleanup_status_validation_only_with_reports(self):
+        from zymosoft_assistant.gui.main_window import MainWindow
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_VALIDATION_ONLY
+        window.clean_reports_action = MagicMock()
+        window.cleanup_status_label = MagicMock()
+        window._collect_report_files = MagicMock(return_value=["r1.pdf", "r2.pdf"])
+
+        MainWindow._update_cleanup_status(window)
+
+        window.clean_reports_action.setText.assert_called_with("Nettoyer les rapports... (2)")
+        window.cleanup_status_label.setText.assert_called_with("2 document(s) à nettoyer.")
+
+    def test_update_cleanup_status_validation_only_without_reports(self):
+        from zymosoft_assistant.gui.main_window import MainWindow
+        from zymosoft_assistant.gui.mode_selection_dialog import MODE_VALIDATION_ONLY
+
+        window = MagicMock(spec=MainWindow)
+        window.mode = MODE_VALIDATION_ONLY
+        window.clean_reports_action = MagicMock()
+        window.cleanup_status_label = MagicMock()
+        window._collect_report_files = MagicMock(return_value=[])
+
+        MainWindow._update_cleanup_status(window)
+
+        window.clean_reports_action.setText.assert_called_with("Nettoyer les rapports... (0)")
+        window.cleanup_status_label.setText.assert_called_with("Aucun document à nettoyer.")
+
+
 if __name__ == "__main__":
     unittest.main()

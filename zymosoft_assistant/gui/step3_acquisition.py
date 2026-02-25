@@ -35,8 +35,79 @@ from zymosoft_assistant.scripts.Routine_VALIDATION_ZC_18022025 import compare_en
 from zymosoft_assistant.scripts.getDatasFromWellResults import processWellResults, calculateLODLOQComparison
 from zymosoft_assistant.core.file_validator import FileValidator
 from .step_frame import StepFrame
+from .mode_selection_dialog import MODE_VALIDATION_ONLY
 
 logger = logging.getLogger(__name__)
+
+_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg')
+_VALIDATION_GRAPH_SUBDIRS = ("", "validation_comparison", "comparaison_enzymo_routine")
+
+
+def _candidate_results_folders(results_folder):
+    candidates = []
+    if not results_folder:
+        return candidates
+
+    normalized = os.path.normpath(results_folder)
+    candidates.append(normalized)
+
+    swapped = normalized
+    if "ZYMOPTIQ_CLIENT" in normalized:
+        swapped = normalized.replace("ZYMOPTIQ_CLIENT", "ZYMOPTIQ_EXPERT")
+    elif "ZYMOPTIQ_EXPERT" in normalized:
+        swapped = normalized.replace("ZYMOPTIQ_EXPERT", "ZYMOPTIQ_CLIENT")
+
+    if swapped != normalized:
+        candidates.append(swapped)
+
+    unique = []
+    for candidate in candidates:
+        if candidate and candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _collect_validation_graph_paths(results_folder):
+    graph_paths = []
+    if not results_folder:
+        return graph_paths
+
+    validation_dir = os.path.join(results_folder, "validation_results")
+    if not os.path.isdir(validation_dir):
+        return graph_paths
+
+    for subdir in _VALIDATION_GRAPH_SUBDIRS:
+        target_dir = validation_dir if not subdir else os.path.join(validation_dir, subdir)
+        if not os.path.isdir(target_dir):
+            continue
+
+        for file_name in os.listdir(target_dir):
+            file_path = os.path.join(target_dir, file_name)
+            if not os.path.isfile(file_path):
+                continue
+
+            lower_name = file_name.lower()
+            has_known_ext = lower_name.endswith(_IMAGE_EXTENSIONS)
+            is_extensionless = "." not in file_name
+
+            if has_known_ext or is_extensionless:
+                graph_paths.append(file_path)
+
+    return sorted(graph_paths)
+
+
+def _resolve_folder_with_expected_file(folder, expected_filename):
+    if not folder:
+        return folder
+
+    for candidate in _candidate_results_folders(folder):
+        candidate_file = os.path.join(candidate, expected_filename)
+        if os.path.exists(candidate_file):
+            if os.path.normpath(candidate) != os.path.normpath(folder):
+                logger.warning(f"Changement automatique de dossier pour trouver {expected_filename}: {folder} -> {candidate}")
+            return candidate
+
+    return folder
 
 
 class SelectionBox(QPushButton):
@@ -378,9 +449,10 @@ class AcquisitionDetailsDialog(QDialog):
     """
     A dialog to show the detailed results of a past acquisition.
     """
-    def __init__(self, acquisition_data, parent=None):
+    def __init__(self, acquisition_data, parent=None, mode=None):
         super().__init__(parent)
         self.acquisition_data = acquisition_data
+        self.mode = mode or "full"
         self.setWindowTitle(f"Détails de l'Acquisition #{acquisition_data['id']}")
         self.setMinimumSize(1000, 700)
 
@@ -445,7 +517,8 @@ class AcquisitionDetailsDialog(QDialog):
         self._display_statistics()
         self._display_well_results_comparison()
         self._display_lod_loq_comparison()
-        self._display_log_analysis()
+        if self.mode != MODE_VALIDATION_ONLY:
+            self._display_log_analysis()
         self._display_graphs()
         # No need to update tab colors here as it's a static view
 
@@ -481,12 +554,13 @@ class AcquisitionDetailsDialog(QDialog):
         lod_loq_layout.addWidget(self.lod_loq_table)
         self.info_stats_tabs.add_tab(lod_loq_tab, "Comparaison LOD/LOQ")
 
-        log_analysis_tab = QWidget()
-        log_analysis_layout = QVBoxLayout(log_analysis_tab)
-        self.log_analysis_table = QTableWidget(0, 2)
-        self.log_analysis_table.setHorizontalHeaderLabels(["Paramètre", "Valeur"])
-        log_analysis_layout.addWidget(self.log_analysis_table)
-        self.info_stats_tabs.add_tab(log_analysis_tab, "Analyse des logs")
+        if self.mode != MODE_VALIDATION_ONLY:
+            log_analysis_tab = QWidget()
+            log_analysis_layout = QVBoxLayout(log_analysis_tab)
+            self.log_analysis_table = QTableWidget(0, 2)
+            self.log_analysis_table.setHorizontalHeaderLabels(["Paramètre", "Valeur"])
+            log_analysis_layout.addWidget(self.log_analysis_table)
+            self.info_stats_tabs.add_tab(log_analysis_tab, "Analyse des logs")
 
     def _create_image_display_widgets(self, right_layout):
         images_frame = QGroupBox("Images")
@@ -558,36 +632,71 @@ class AcquisitionDetailsDialog(QDialog):
                 self.stats_table.setItem(row, 2, QTableWidgetItem(""))
 
         validation = analysis.get("validation", {})
-        if validation and 'comparison' in validation:
+        if validation:
             self._add_validation_statistics(validation)
 
     def _add_validation_statistics(self, validation):
-        row = self.stats_table.rowCount()
-        self.stats_table.insertRow(row)
-        self.stats_table.setItem(row, 0, QTableWidgetItem("--- Résultats de validation ---"))
+        def _add_separator(label):
+            row = self.stats_table.rowCount()
+            self.stats_table.insertRow(row)
+            item = QTableWidgetItem(f"--- {label} ---")
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            self.stats_table.setItem(row, 0, item)
+            self.stats_table.setItem(row, 1, QTableWidgetItem(""))
+            self.stats_table.setItem(row, 2, QTableWidgetItem(""))
 
-        comp = validation['comparison']
-        comp_items = [
-            ("Pente", f"{comp.get('slope', 0):.4f}", 'slope'),
-            ("R²", f"{comp.get('r_value', 0):.4f}", 'r2'),
-        ]
-        for param, value, criteria_key in comp_items:
+        def _add_row(param, value, criteria_key=None, raw_value=None):
             row = self.stats_table.rowCount()
             self.stats_table.insertRow(row)
             self.stats_table.setItem(row, 0, QTableWidgetItem(param))
-            value_item = QTableWidgetItem(value)
+            value_item = QTableWidgetItem(str(value))
             self.stats_table.setItem(row, 1, value_item)
-
-            criteria = VALIDATION_CRITERIA.get(criteria_key, {})
+            criteria = VALIDATION_CRITERIA.get(criteria_key, {}) if criteria_key else {}
             if criteria:
                 criteria_text = f"> {criteria['min']}" if criteria_key == 'r2' else f"{criteria['min']} - {criteria['max']}"
                 self.stats_table.setItem(row, 2, QTableWidgetItem(criteria_text))
                 try:
-                    val = float(value.split(' ')[0])
+                    val = float(raw_value if raw_value is not None else value)
                     is_valid = (val >= criteria['min'] and val <= criteria['max']) if criteria_key != 'r2' else (val >= criteria['min'])
                     value_item.setBackground(Qt.green if is_valid else Qt.red)
                 except (ValueError, TypeError):
                     pass
+            else:
+                self.stats_table.setItem(row, 2, QTableWidgetItem(""))
+
+        # WellResults summary
+        if 'well_results_comparison' in validation:
+            _add_separator("Comparaison WellResults")
+            df = validation['well_results_comparison']
+            total = len(df)
+            valid = int((df['valid'] == True).sum()) if 'valid' in df.columns else 'N/A'
+            rate = f"{valid / total * 100:.1f}%" if isinstance(valid, int) and total > 0 else 'N/A'
+            _add_row("Total des tests", total)
+            _add_row("Tests valides", valid)
+            _add_row("Taux de validation", rate)
+
+        # LOD/LOQ summary
+        if 'lod_loq_comparison' in validation:
+            _add_separator("Comparaison LOD/LOQ")
+            df = validation['lod_loq_comparison']
+            for col_valid, label in [('Lod_Valid', 'LOD valides'), ('Loq_Valid', 'LOQ valides')]:
+                actual_col = next((c for c in df.columns if c.lower() == col_valid.lower()), None)
+                if actual_col:
+                    total = len(df)
+                    valid = int((df[actual_col] == True).sum())
+                    _add_row(label, f"{valid}/{total}")
+
+        # Reference comparison
+        if 'comparison' in validation:
+            _add_separator("Comparaison aux références")
+            comp = validation['comparison']
+            _add_row("Pente", f"{comp.get('slope', 0):.4f}", 'slope', comp.get('slope', 0))
+            _add_row("Ordonnée à l'origine", f"{comp.get('intercept', 0):.4f}", 'intercept', comp.get('intercept', 0))
+            _add_row("R²", f"{comp.get('r_value', 0):.4f}", 'r2', comp.get('r_value', 0))
+            _add_row("Points hors tolérance", str(comp.get('nb_puits_loin_fit', 'N/A')), 'nb_puits_loin_fit',
+                     comp.get('nb_puits_loin_fit', None))
 
     def _display_well_results_comparison(self):
         # This is a simplified display logic
@@ -622,14 +731,31 @@ class AcquisitionDetailsDialog(QDialog):
 
     def _display_graphs(self):
         analysis = self.acquisition_data.get('analysis', {})
-        graph_paths = analysis.get("graphs", [])
+        self.graph_images = []
+        self.graph_titles = []
 
-        # Also look for graphs in the validation_results subfolder
-        validation_dir = os.path.join(self.acquisition_data['results_folder'], "validation_results")
-        if os.path.exists(validation_dir):
-            for file in os.listdir(validation_dir):
-                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    graph_paths.append(os.path.join(validation_dir, file))
+        graph_paths = [p for p in analysis.get("graphs", []) if os.path.exists(p)]
+        results_folders = []
+
+        for folder in [
+            self.acquisition_data.get('results_folder', ''),
+            self.acquisition_data.get('folder', ''),
+            analysis.get('folder', ''),
+        ]:
+            for candidate in _candidate_results_folders(folder):
+                if candidate not in results_folders:
+                    results_folders.append(candidate)
+
+        for folder in results_folders:
+            graph_paths.extend(_collect_validation_graph_paths(folder))
+
+        seen = set()
+        dedup_graph_paths = []
+        for path in graph_paths:
+            if path not in seen:
+                seen.add(path)
+                dedup_graph_paths.append(path)
+        graph_paths = dedup_graph_paths
 
         if not graph_paths:
             self.graphs_widget.setText("Aucune image disponible")
@@ -650,7 +776,9 @@ class AcquisitionDetailsDialog(QDialog):
     def _display_current_image(self):
         if 0 <= self.current_image_index < len(self.graph_images):
             image = self.graph_images[self.current_image_index]
-            self.graphs_widget.setPixmap(image.scaled(self.graphs_widget.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            w = self.graphs_widget.width() or 800
+            h = self.graphs_widget.height() or 600
+            self.graphs_widget.setPixmap(image.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             self.image_title_label.setText(self.graph_titles[self.current_image_index])
 
     def _update_image_navigation(self):
@@ -677,12 +805,23 @@ class AcquisitionDetailsDialog(QDialog):
 
             # Prepare data for the report, including the validation status
             report_data = {
+                'installation_id': self.acquisition_data.get('installation_id', 'Inconnu'),
+                'acquisition_id': self.acquisition_data.get('id', 'Inconnu'),
+                'plate_type': self.acquisition_data.get('plate_type', 'inconnu'),
+                'acquisition_mode': self.acquisition_data.get('mode', 'inconnu'),
+                'folder': self.acquisition_data.get('results_folder', ''),
+                'reference_folder': self.acquisition_data.get('reference_folder', ''),
                 'analysis': self.acquisition_data.get('analysis', {}),
                 'comments': self.acquisition_data.get('comments', ''),
-                'validated': self.acquisition_data.get('validated', False)
+                'validated': self.acquisition_data.get('validated', False),
+                'manual_validation': self.acquisition_data.get('manual_validations', {})
             }
 
-            report_path = report_generator.generate_acquisition_report(report_data)
+            if self.mode == MODE_VALIDATION_ONLY:
+                report_path = report_generator.generate_acquisition_report_validation(report_data)
+            else:
+                step1_checks = self.acquisition_data.get('step1_checks', {})
+                report_path = report_generator.generate_acquisition_report_full(report_data, step1_checks)
             QMessageBox.information(self, "Rapport Généré", f"Le rapport a été généré avec succès:\n{report_path}")
             os.startfile(report_path)
         except Exception as e:
@@ -761,6 +900,10 @@ class Step3Acquisition(StepFrame):
         self.analysis_error.connect(self._handle_analysis_error)
 
         logger.info("Étape 3 initialisée")
+
+    @property
+    def _is_validation_only(self):
+        return hasattr(self.main_window, 'mode') and self.main_window.mode == MODE_VALIDATION_ONLY
 
     def _initialize_widget_references(self):
         """
@@ -1196,17 +1339,18 @@ class Step3Acquisition(StepFrame):
         lod_loq_layout.addWidget(self.lod_loq_table)
         self.lod_loq_tab_index = self.info_stats_tabs.add_tab(lod_loq_tab, "Comparaison LOD/LOQ")
 
-        # Onglet Analyse des logs
-        log_analysis_tab = QWidget()
-        log_analysis_layout = QVBoxLayout(log_analysis_tab)
-        self.log_info_label = QLabel("Aucune analyse de log disponible.")
-        self.log_info_label.setWordWrap(True)
-        log_analysis_layout.addWidget(self.log_info_label)
-        self.log_analysis_table = QTableWidget(0, 2)
-        self.log_analysis_table.setHorizontalHeaderLabels(["Paramètre", "Valeur"])
-        self.log_analysis_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        log_analysis_layout.addWidget(self.log_analysis_table)
-        self.log_analysis_tab_index = self.info_stats_tabs.add_tab(log_analysis_tab, "Analyse des logs")
+        # Onglet Analyse des logs (non affiché en mode validation uniquement)
+        if not self._is_validation_only:
+            log_analysis_tab = QWidget()
+            log_analysis_layout = QVBoxLayout(log_analysis_tab)
+            self.log_info_label = QLabel("Aucune analyse de log disponible.")
+            self.log_info_label.setWordWrap(True)
+            log_analysis_layout.addWidget(self.log_info_label)
+            self.log_analysis_table = QTableWidget(0, 2)
+            self.log_analysis_table.setHorizontalHeaderLabels(["Paramètre", "Valeur"])
+            self.log_analysis_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            log_analysis_layout.addWidget(self.log_analysis_table)
+            self.log_analysis_tab_index = self.info_stats_tabs.add_tab(log_analysis_tab, "Analyse des logs")
 
     def _update_tab_colors(self):
         """
@@ -1232,9 +1376,10 @@ class Step3Acquisition(StepFrame):
             lod_loq_status = not self._has_lod_loq_errors()
             self.info_stats_tabs.update_tab_status(self.lod_loq_tab_index, lod_loq_status)
 
-            # Statut pour l'analyse des logs
-            log_status = "log_analysis_error" not in self.analysis_results if self.analysis_results else None
-            self.info_stats_tabs.update_tab_status(self.log_analysis_tab_index, log_status)
+            # Statut pour l'analyse des logs (absent en mode validation uniquement)
+            if not self._is_validation_only and hasattr(self, 'log_analysis_tab_index'):
+                log_status = "log_analysis_error" not in self.analysis_results if self.analysis_results else None
+                self.info_stats_tabs.update_tab_status(self.log_analysis_tab_index, log_status)
 
         except Exception as e:
             logger.error(f"Erreur dans _update_tab_colors: {str(e)}", exc_info=True)
@@ -1559,8 +1704,9 @@ class Step3Acquisition(StepFrame):
             self._perform_enzymo_comparison(results_folder, reference_folder, validation_output_dir,
                                             validation_results, machine_to_validate, reference_machine)
 
-        # Perform log analysis
-        self._perform_log_analysis(results_folder, analysis_results)
+        # Perform log analysis (non exécuté en mode validation uniquement)
+        if not self._is_validation_only:
+            self._perform_log_analysis(results_folder, analysis_results)
 
         # Add validation results to analysis results
         if validation_results:
@@ -1578,7 +1724,9 @@ class Step3Acquisition(StepFrame):
             self.progress_updated.emit(40, "Comparaison des résultats WellResults...")
             try:
                 # Exécuter la comparaison WellResults
-                well_results_comparison = processWellResults(self.results_folder_var, reference_folder)
+                results_folder = _resolve_folder_with_expected_file(self.results_folder_var, "WellResults.xlsx")
+                reference_folder = _resolve_folder_with_expected_file(reference_folder, "WellResults.xlsx")
+                well_results_comparison = processWellResults(results_folder, reference_folder)
 
                 # Sauvegarder les résultats dans le dossier de validation
                 csv_path = os.path.join(validation_output_dir, "comparaison_resultats_puits.csv")
@@ -1601,7 +1749,9 @@ class Step3Acquisition(StepFrame):
             self.progress_updated.emit(60, "Comparaison des LOD et LOQ...")
             try:
                 # Exécuter la comparaison LOD/LOQ
-                lod_loq_comparison = calculateLODLOQComparison(self.results_folder_var, reference_folder)
+                results_folder = _resolve_folder_with_expected_file(self.results_folder_var, "WellResults.xlsx")
+                reference_folder = _resolve_folder_with_expected_file(reference_folder, "WellResults.xlsx")
+                lod_loq_comparison = calculateLODLOQComparison(results_folder, reference_folder)
 
                 # Sauvegarder les résultats dans le dossier de validation
                 csv_path = os.path.join(validation_output_dir, "comparaison_LOD_LOQ.csv")
@@ -1623,6 +1773,9 @@ class Step3Acquisition(StepFrame):
         """
         self.progress_updated.emit(50, "Comparaison aux références...")
         try:
+            results_folder = _resolve_folder_with_expected_file(results_folder, "synthese_interferometric_data.csv")
+            reference_folder = _resolve_folder_with_expected_file(reference_folder, "synthese_interferometric_data.csv")
+
             # Déterminer si c'est un nanofilm ou non en fonction du type de plaque
             is_nanofilm = "nanofilm" in self.plate_type_var.lower() if self.plate_type_var else False
 
@@ -1673,6 +1826,9 @@ class Step3Acquisition(StepFrame):
         self.progress_updated.emit(70, "Comparaison des données enzymatiques...")
 
         try:
+            results_folder = _resolve_folder_with_expected_file(results_folder, "WellResults.xlsx")
+            reference_folder = _resolve_folder_with_expected_file(reference_folder, "WellResults.xlsx")
+
             # Obtenir les dossiers parents
             results_parent_folder = os.path.dirname(results_folder)
             reference_parent_folder = os.path.dirname(reference_folder)
@@ -1931,7 +2087,8 @@ class Step3Acquisition(StepFrame):
             self._display_well_results_comparison()
             self._display_lod_loq_comparison()
             self._display_graphs()
-            self._display_log_analysis()
+            if not self._is_validation_only:
+                self._display_log_analysis()
 
             # Mettre à jour les couleurs des onglets après avoir affiché tous les résultats
             self._update_tab_colors()
@@ -2376,75 +2533,69 @@ class Step3Acquisition(StepFrame):
         """
         Add validation statistics to the stats table
         """
-        # Ajouter un séparateur
-        row = self.stats_table.rowCount()
-        self.stats_table.insertRow(row)
-        self.stats_table.setItem(row, 0, QTableWidgetItem("--- Résultats de validation ---"))
-        self.stats_table.setItem(row, 1, QTableWidgetItem(""))
-        self.stats_table.setItem(row, 2, QTableWidgetItem(""))
+        from zymosoft_assistant.utils.constants import VALIDATION_CRITERIA
 
-        # Statistiques de comparaison aux références
+        def _add_separator(label):
+            row = self.stats_table.rowCount()
+            self.stats_table.insertRow(row)
+            item = QTableWidgetItem(f"--- {label} ---")
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            self.stats_table.setItem(row, 0, item)
+            self.stats_table.setItem(row, 1, QTableWidgetItem(""))
+            self.stats_table.setItem(row, 2, QTableWidgetItem(""))
+
+        def _add_row(param, value, criteria_key=None, raw_value=None):
+            row = self.stats_table.rowCount()
+            self.stats_table.insertRow(row)
+            self.stats_table.setItem(row, 0, QTableWidgetItem(param))
+            value_item = QTableWidgetItem(str(value))
+            self.stats_table.setItem(row, 1, value_item)
+            criteria = VALIDATION_CRITERIA.get(criteria_key, {}) if criteria_key else {}
+            if criteria:
+                criteria_text = f"> {criteria['min']}" if criteria_key == 'r2' else f"{criteria['min']} - {criteria['max']}"
+                self.stats_table.setItem(row, 2, QTableWidgetItem(criteria_text))
+                try:
+                    val = float(raw_value if raw_value is not None else value)
+                    is_valid = (val >= criteria['min'] and val <= criteria['max']) if criteria_key != 'r2' else (val >= criteria['min'])
+                    value_item.setBackground(Qt.green if is_valid else Qt.red)
+                except (ValueError, TypeError):
+                    pass
+            else:
+                self.stats_table.setItem(row, 2, QTableWidgetItem(""))
+
+        # WellResults summary
+        if 'well_results_comparison' in validation:
+            _add_separator("Comparaison WellResults")
+            df = validation['well_results_comparison']
+            total = len(df)
+            valid = int((df['valid'] == True).sum()) if 'valid' in df.columns else 'N/A'
+            rate = f"{valid / total * 100:.1f}%" if isinstance(valid, int) and total > 0 else 'N/A'
+            _add_row("Total des tests", total)
+            _add_row("Tests valides", valid)
+            _add_row("Taux de validation", rate)
+
+        # LOD/LOQ summary
+        if 'lod_loq_comparison' in validation:
+            _add_separator("Comparaison LOD/LOQ")
+            df = validation['lod_loq_comparison']
+            for col_valid, label in [('Lod_Valid', 'LOD valides'), ('Loq_Valid', 'LOQ valides')]:
+                actual_col = next((c for c in df.columns if c.lower() == col_valid.lower()), None)
+                if actual_col:
+                    total = len(df)
+                    valid = int((df[actual_col] == True).sum())
+                    _add_row(label, f"{valid}/{total}")
+
+        # Reference comparison
         if 'comparison' in validation:
+            _add_separator("Comparaison aux références")
             comp = validation['comparison']
-
-            # Import des critères de validation
-            from zymosoft_assistant.utils.constants import VALIDATION_CRITERIA
-
-            # Création des items avec vérification des critères
-            comp_items = [
-                ("Pente", f"{comp.get('slope', 0):.4f}", 'slope'),
-                ("Ordonnée à l'origine", f"{comp.get('intercept', 0):.4f}", 'intercept'),
-                ("R²", f"{comp.get('r_value', 0):.4f}", 'r2'),
-                ("Points hors tolérance", str(comp.get('nb_puits_loin_fit', 'N/A')), 'nb_puits_loin_fit'),
-
-            ]
-
-            for param, value, criteria_key in comp_items:
-                row = self.stats_table.rowCount()
-                self.stats_table.insertRow(row)
-
-                # Paramètre
-                param_item = QTableWidgetItem(param)
-                self.stats_table.setItem(row, 0, param_item)
-
-                # Valeur
-                value_item = QTableWidgetItem(value)
-                self.stats_table.setItem(row, 1, value_item)
-
-                # Critère de référence et coloration
-                if criteria_key and criteria_key in VALIDATION_CRITERIA:
-                    criteria = VALIDATION_CRITERIA[criteria_key]
-                    criteria_text = f"{criteria['min']} - {criteria['max']}" if criteria_key != 'r2' else f"> {criteria['min']}"
-                    criteria_item = QTableWidgetItem(criteria_text)
-                    self.stats_table.setItem(row, 2, criteria_item)
-
-                    # Vérification si la valeur respecte les critères
-                    try:
-                        if criteria_key == 'r2':
-                            val = float(comp.get('r_value', 0))
-                            is_valid = val >= criteria['min'] and val <= criteria['max']
-                        elif criteria_key == 'nb_puits_loin_fit':
-                            val = int(comp.get('nb_puits_loin_fit', 0))
-                            is_valid = val >= criteria['min'] and val <= criteria['max']
-                        elif criteria_key == 'slope':
-                            val = float(comp.get('slope', 0))
-                            is_valid = val >= criteria['min'] and val <= criteria['max']
-                        elif criteria_key == 'intercept':
-                            val = float(comp.get('intercept', 0))
-                            is_valid = val >= criteria['min'] and val <= criteria['max']
-                        else:
-                            is_valid = True
-
-                        # Coloration de la cellule
-                        if is_valid:
-                            value_item.setBackground(Qt.green)
-                        else:
-                            value_item.setBackground(Qt.red)
-                    except (ValueError, TypeError):
-                        # En cas d'erreur de conversion, on ne colore pas
-                        pass
-                else:
-                    self.stats_table.setItem(row, 2, QTableWidgetItem(""))
+            _add_row("Pente", f"{comp.get('slope', 0):.4f}", 'slope', comp.get('slope', 0))
+            _add_row("Ordonnée à l'origine", f"{comp.get('intercept', 0):.4f}", 'intercept', comp.get('intercept', 0))
+            _add_row("R²", f"{comp.get('r_value', 0):.4f}", 'r2', comp.get('r_value', 0))
+            _add_row("Points hors tolérance", str(comp.get('nb_puits_loin_fit', 'N/A')),
+                     'nb_puits_loin_fit', comp.get('nb_puits_loin_fit', None))
 
     def _display_graphs(self):
         """
@@ -2460,24 +2611,33 @@ class Step3Acquisition(StepFrame):
             self.graph_titles = []
 
             # Récupérer les chemins des graphiques générés par l'analyse
-            graph_paths = self.analysis_results.get("graphs", [])
+            graph_paths = [p for p in self.analysis_results.get("graphs", []) if os.path.exists(p)]
+            logger.debug(f"_display_graphs: {len(graph_paths)} graphique(s) depuis AcquisitionAnalyzer")
 
             # Ajouter les images de validation si elles existent
-            validation_dir = ""
-            if self.results_folder_var:
-                validation_dir = os.path.join(self.results_folder_var, "validation_results")
-                if os.path.exists(validation_dir):
-                    for file in os.listdir(validation_dir):
-                        if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                            graph_paths.append(os.path.join(validation_dir, file))
+            results_folders = []
+            for folder in [self.results_folder_var, self.analysis_results.get("folder", "")]:
+                for candidate in _candidate_results_folders(folder):
+                    if candidate not in results_folders:
+                        results_folders.append(candidate)
 
-                    # Ajouter les images des sous-dossiers de validation
-                    for subdir in ["validation_comparison", "comparaison_enzymo_routine"]:
-                        subdir_path = os.path.join(validation_dir, subdir)
-                        if os.path.exists(subdir_path):
-                            for file in os.listdir(subdir_path):
-                                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                                    graph_paths.append(os.path.join(subdir_path, file))
+            for folder in results_folders:
+                validation_dir = os.path.join(folder, "validation_results")
+                logger.debug(f"_display_graphs: recherche dans {validation_dir} (existe: {os.path.exists(validation_dir)})")
+                files_found = _collect_validation_graph_paths(folder)
+                if files_found:
+                    logger.debug(f"_display_graphs: fichiers trouves depuis {folder}: {[os.path.basename(f) for f in files_found]}")
+                    graph_paths.extend(files_found)
+
+            seen = set()
+            dedup_graph_paths = []
+            for path in graph_paths:
+                if path not in seen:
+                    seen.add(path)
+                    dedup_graph_paths.append(path)
+            graph_paths = dedup_graph_paths
+
+            logger.info(f"_display_graphs: {len(graph_paths)} image(s) trouvée(s) au total: {graph_paths}")
 
             if not graph_paths:
                 self.graphs_widget.setText("Aucune image disponible")
@@ -2529,9 +2689,10 @@ class Step3Acquisition(StepFrame):
         try:
             if 0 <= self.current_image_index < len(self.graph_images) and self.graphs_widget:
                 image = self.graph_images[self.current_image_index]
+                w = self.graphs_widget.width() or 800
+                h = self.graphs_widget.height() or 600
                 self.graphs_widget.setPixmap(image.scaled(
-                    self.graphs_widget.width(),
-                    self.graphs_widget.height(),
+                    w, h,
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
                 ))
@@ -2797,7 +2958,7 @@ class Step3Acquisition(StepFrame):
             acquisition_data = next((acq for acq in self.acquisitions if acq['id'] == acquisition_id), None)
 
             if acquisition_data:
-                dialog = AcquisitionDetailsDialog(acquisition_data, self.widget)
+                dialog = AcquisitionDetailsDialog(acquisition_data, self.widget, mode=self.main_window.mode)
                 dialog.exec_()
             else:
                 QMessageBox.warning(self.widget, "Erreur", f"Impossible de trouver les données pour l'acquisition #{acquisition_id}.")
@@ -2835,10 +2996,12 @@ class Step3Acquisition(StepFrame):
                 return
 
             if current_index == 0:  # Page de Configuration
+                self.next_substep_button.setVisible(True)
                 self.next_substep_button.setText("Étape suivante")
                 self.next_substep_button.setEnabled(True)
                 self.next_substep_button.setStyleSheet(f"background-color: {COLOR_SCHEME['primary']}; color: white;")
             elif current_index == 1:  # Page de Sélection des résultats
+                self.next_substep_button.setVisible(True)
                 self.next_substep_button.setText("Analyser les résultats")
                 results_folder_valid = bool(self.results_folder_var and self.results_folder_widget.path_label.toolTip() == "")
                 reference_folder_required = self.do_compare_to_ref or self.do_compare_enzymo_to_ref
@@ -2854,9 +3017,13 @@ class Step3Acquisition(StepFrame):
                 else:
                     self.next_substep_button.setStyleSheet(f"background-color: {COLOR_SCHEME['disabled']}; color: white;")
             elif current_index == 2:  # Page d'Analyse
-                self.next_substep_button.setText("Valider et terminer l'acquisition")
-                self.next_substep_button.setStyleSheet(f"background-color: {COLOR_SCHEME['primary']}; color: white;")
-                self.next_substep_button.setEnabled(True)
+                if self._is_validation_only:
+                    self.next_substep_button.setVisible(False)
+                else:
+                    self.next_substep_button.setVisible(True)
+                    self.next_substep_button.setText("Valider et terminer l'acquisition")
+                    self.next_substep_button.setStyleSheet(f"background-color: {COLOR_SCHEME['primary']}; color: white;")
+                    self.next_substep_button.setEnabled(True)
             else:
                 self.next_substep_button.setEnabled(False)
         except Exception as e:
@@ -2894,19 +3061,20 @@ class Step3Acquisition(StepFrame):
             message_label.setWordWrap(True)
             layout.addWidget(message_label)
 
-            options_layout = QVBoxLayout()
-            options_layout.setAlignment(Qt.AlignLeft)
-            self.check_acquisition_time = QCheckBox("Temps d'acquisition correct")
-            self.check_acquisition_time.setChecked(False)
-            options_layout.addWidget(self.check_acquisition_time)
-            self.check_drift = QCheckBox("Drift acceptable")
-            self.check_drift.setChecked(False)
-            options_layout.addWidget(self.check_drift)
-            self.check_blurriness = QCheckBox("Flou acceptable")
-            self.check_blurriness.setChecked(False)
-            options_layout.addWidget(self.check_blurriness)
-
-            layout.addLayout(options_layout)
+            # Checkboxes de validation manuelle des logs (non affichées en mode validation uniquement)
+            if not self._is_validation_only:
+                options_layout = QVBoxLayout()
+                options_layout.setAlignment(Qt.AlignLeft)
+                self.check_acquisition_time = QCheckBox("Temps d'acquisition correct")
+                self.check_acquisition_time.setChecked(False)
+                options_layout.addWidget(self.check_acquisition_time)
+                self.check_drift = QCheckBox("Drift acceptable")
+                self.check_drift.setChecked(False)
+                options_layout.addWidget(self.check_drift)
+                self.check_blurriness = QCheckBox("Flou acceptable")
+                self.check_blurriness.setChecked(False)
+                options_layout.addWidget(self.check_blurriness)
+                layout.addLayout(options_layout)
 
             # Champ de commentaires
             comments_label = QLabel("Commentaires:")
@@ -2933,25 +3101,19 @@ class Step3Acquisition(StepFrame):
             result = dialog.exec_()
 
             if result == QDialog.Accepted:
-                # Vérifier les options supplémentaires , si l'utilisateur voulais valider l'acquisition il doit cocher toutes les options supplémentaires si il voulais invalider rien ne l'oblige à cocher les options
-                if action_type == "validate_continue":
-                    if not (self.check_acquisition_time.isChecked() and self.check_drift.isChecked() and self.check_blurriness.isChecked()):
-                        QMessageBox.warning(self.widget, "Attention",
-                                            "Veuillez vérifier que toutes les options sont cochées avant de valider l'acquisition.")
-                        return False
-                elif action_type == "validate_next":
-                    if not (self.check_acquisition_time.isChecked() and self.check_drift.isChecked() and self.check_blurriness.isChecked()):
-                        QMessageBox.warning(self.widget, "Attention",
-                                            "Veuillez vérifier que toutes les options sont cochées avant de valider l'acquisition.")
-                        return False
-
-                # stocker les options supplémentaires dans l'analyse sous le nom "manuel_verfications"
-                self.manual_validation = {
-                    "time": self.check_acquisition_time.isChecked(),
-                    "drift": self.check_drift.isChecked(),
-                    "blur": self.check_blurriness.isChecked()
-                }
-                self.analysis_results['manual_validation'] = self.manual_validation
+                # Vérification et stockage des options log (uniquement en mode installation complète)
+                if not self._is_validation_only:
+                    if action_type in ("validate_continue", "validate_next"):
+                        if not (self.check_acquisition_time.isChecked() and self.check_drift.isChecked() and self.check_blurriness.isChecked()):
+                            QMessageBox.warning(self.widget, "Attention",
+                                                "Veuillez vérifier que toutes les options sont cochées avant de valider l'acquisition.")
+                            return False
+                    self.manual_validation = {
+                        "time": self.check_acquisition_time.isChecked(),
+                        "drift": self.check_drift.isChecked(),
+                        "blur": self.check_blurriness.isChecked()
+                    }
+                    self.analysis_results['manual_validation'] = self.manual_validation
 
 
                 # Récupérer les commentaires
@@ -2997,8 +3159,8 @@ class Step3Acquisition(StepFrame):
             # Generate the report automatically upon finalizing, with the correct status
             self._generate_acquisition_report(validated)
 
-            # copie the analised log file to the results folder
-            if self.results_folder_var:
+            # copie the analised log file to the results folder (ignoré en mode validation uniquement)
+            if self.results_folder_var and not self._is_validation_only:
                 from zymosoft_assistant.scripts.processAcquisitionLog import getLogFile, analyzeLogFile
 
                 step2_data = self.main_window.session_data.get("step2_checks", {})
@@ -3142,9 +3304,11 @@ class Step3Acquisition(StepFrame):
                 'manual_validation': self.manual_validation
             }
 
-            step1_checks = self.main_window.session_data.get('client_info', {})
-
-            report_path = report_generator.generate_acquisition_report(report_data, step1_checks)
+            if self._is_validation_only:
+                report_path = report_generator.generate_acquisition_report_validation(report_data)
+            else:
+                step1_checks = self.main_window.session_data.get('client_info', {})
+                report_path = report_generator.generate_acquisition_report_full(report_data, step1_checks)
 
             # Sauvegarder le chemin du rapport dans les données de l'acquisition
             current_acquisition = next((acq for acq in self.acquisitions if acq['id'] == self.current_acquisition_id), None)
@@ -3155,6 +3319,9 @@ class Step3Acquisition(StepFrame):
 
             QMessageBox.information(self.widget, "Rapport",
                                     f"Le rapport d'acquisition a été généré avec succès:\n{report_path}")
+
+            if hasattr(self.main_window, "_update_cleanup_status"):
+                self.main_window._update_cleanup_status()
 
             try:
                 os.startfile(report_path)

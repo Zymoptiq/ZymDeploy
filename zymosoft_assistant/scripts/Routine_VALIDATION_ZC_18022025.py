@@ -1924,7 +1924,7 @@ def compare_enzymo_2_ref(directory_source_instrument_1,type_instrument_1,acquisi
         plt.xlabel('% de dégradation au ' + type_instrument_1)
         plt.ylabel('% de dégradation au ' + type_instrument_2)
         plt.legend()
-        plt.savefig(directory_to_save + '\\' + acquisition_name_instrument_2 + '_' + onglet + '_taux_degradation')
+        plt.savefig(directory_to_save + '\\' + acquisition_name_instrument_2 + '_' + onglet + '_taux_degradation.png')
         # plt.close(26)
         plt.close()
 
@@ -2016,8 +2016,35 @@ def compare_enzymo_2_ref(directory_source_instrument_1,type_instrument_1,acquisi
         plt.ylabel('Z.U.')
         plt.legend()
 
-        plt.savefig(directory_to_save + '\\' + acquisition_name_instrument_2 + '_' + onglet + '_Gammes')
+        plt.savefig(directory_to_save + '\\' + acquisition_name_instrument_2 + '_' + onglet + '_Gammes.png')
         plt.close(27)
+    else:
+        plt.close('all')
+        plt.figure(figsize=(8, 6))
+        plt.text(
+            0.5,
+            0.5,
+            'Aucune donnee commune exploitable pour tracer le taux de degradation',
+            ha='center',
+            va='center',
+            wrap=True
+        )
+        plt.axis('off')
+        plt.savefig(directory_to_save + '\\' + acquisition_name_instrument_2 + '_' + onglet + '_taux_degradation.png')
+        plt.close()
+
+        plt.figure(figsize=(8, 6))
+        plt.text(
+            0.5,
+            0.5,
+            'Aucune donnee commune exploitable pour tracer les gammes',
+            ha='center',
+            va='center',
+            wrap=True
+        )
+        plt.axis('off')
+        plt.savefig(directory_to_save + '\\' + acquisition_name_instrument_2 + '_' + onglet + '_Gammes.png')
+        plt.close()
 
     data_R = [acquisition_name_instrument_1,type_instrument_1,onglet,lod_R,loq_R,sensibilite_R,cv_357_R[0],cv_357_R[1],cv_357_R[2]]
     for k in range(len(Sample_R)):
